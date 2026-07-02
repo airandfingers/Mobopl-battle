@@ -24,20 +24,23 @@ const JUMP_SPEED = 800;
 
 const PALETTE = ["#ff8a3d", "#a86bff", "#ff5d8f", "#3ddc84", "#ffd93b", "#4ec9f5"];
 
-// Platforms: axis-aligned rectangles the blob can stick to.
+// Platforms: rectangles the blob can stick to; `angle` (radians,
+// rotation about the rect center, positive = right end tips down)
+// makes a slope that rocks roll down.
 const platforms = [
   { x: 60,   y: 840, w: 260, h: 70 },
   { x: 430,  y: 750, w: 180, h: 56 },
   { x: 700,  y: 630, w: 170, h: 56 },
-  { x: 960,  y: 380, w: 80,  h: 430 },  // tall wall — crawl up the side!
-  { x: 1130, y: 330, w: 200, h: 56 },
-  { x: 1330, y: 130, w: 320, h: 56 },   // ceiling stretch — hang underneath
+  { x: 960,  y: 380, w: 80,  h: 430 },                  // tall wall — crawl up the side!
+  { x: 1130, y: 330, w: 200, h: 56, angle: 0.14 },      // tilted — rocks roll off to the right
+  { x: 1330, y: 130, w: 320, h: 56 },                   // ceiling stretch — hang underneath
   { x: 1470, y: 550, w: 180, h: 56 },
-  { x: 1690, y: 760, w: 180, h: 62 },
+  { x: 1580, y: 638, w: 240, h: 44, angle: Math.PI / 4 }, // steep ramp down to the star
+  { x: 1740, y: 760, w: 180, h: 62 },
 ];
-platforms.forEach((p, i) => (p.color = PALETTE[i % PALETTE.length]));
+platforms.forEach((p, i) => { p.angle = p.angle || 0; p.color = PALETTE[i % PALETTE.length]; });
 
-const star = { x: 1780, y: 690, r: 26, taken: false, spin: 0 };
+const star = { x: 1830, y: 690, r: 26, taken: false, spin: 0 };
 const SPAWN = { x: 170, y: 780 };
 
 // ---------- blob state ----------
@@ -54,6 +57,10 @@ const blob = {
   blink: 0,
   state: "alive",    // alive | dead | won
   stateTimer: 0,
+  form: "blob",      // blob | rock
+  rockTimer: 0,      // seconds left as a rock
+  rot: 0,            // rock rolling rotation
+  vtx: 0, vty: 0,    // current crawl velocity (for momentum when turning to rock)
 };
 
 // ---------- input ----------
@@ -63,16 +70,16 @@ const input = { x: 0, y: 0, jump: false, jumpBuffer: 0 };
 const joyZone = document.getElementById("joy-zone");
 const joyBase = document.getElementById("joy-base");
 const joyKnob = document.getElementById("joy-knob");
-const JOY_RADIUS = 48;
+let joyRadius = 48; // recomputed from the base's rendered size on each grab
 let joyPointer = null;
 let joyHome = null; // default base position (zone-relative), captured on first touch
 
 function setJoy(dx, dy) {
   const len = Math.hypot(dx, dy);
-  if (len > JOY_RADIUS) { dx *= JOY_RADIUS / len; dy *= JOY_RADIUS / len; }
+  if (len > joyRadius) { dx *= joyRadius / len; dy *= joyRadius / len; }
   joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-  input.x = dx / JOY_RADIUS;
-  input.y = dy / JOY_RADIUS;
+  input.x = dx / joyRadius;
+  input.y = dy / joyRadius;
 }
 
 joyZone.addEventListener("pointerdown", (e) => {
@@ -84,6 +91,7 @@ joyZone.addEventListener("pointerdown", (e) => {
     const r = joyBase.getBoundingClientRect();
     joyHome = { left: r.left - zr.left, top: r.top - zr.top, w: r.width, h: r.height };
   }
+  joyRadius = joyHome.w / 2 - 16;
   // Re-center the stick under the thumb (base is positioned relative to the zone).
   joyBase.style.left = e.clientX - zr.left - joyHome.w / 2 + "px";
   joyBase.style.top = e.clientY - zr.top - joyHome.h / 2 + "px";
@@ -114,12 +122,58 @@ document.getElementById("btn-jump").addEventListener("pointerdown", (e) => {
   input.jumpBuffer = 0.15; // buffered so a hair-early press still jumps
 });
 
-// The other three buttons intentionally do nothing (yet).
+document.getElementById("btn-top").addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  becomeRock();
+});
+
+// The left and right buttons intentionally do nothing (yet).
+
+// ---------- fullscreen ----------
+
+const fsBtn = document.getElementById("btn-fs");
+
+function fsSupported() {
+  return document.fullscreenEnabled || document.webkitFullscreenEnabled;
+}
+function fsActive() {
+  return document.fullscreenElement || document.webkitFullscreenElement;
+}
+function enterFullscreen() {
+  const el = document.documentElement;
+  const req = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (req) Promise.resolve(req.call(el)).catch(() => {});
+}
+function exitFullscreen() {
+  const exit = document.exitFullscreen || document.webkitExitFullscreen;
+  if (exit) Promise.resolve(exit.call(document)).catch(() => {});
+}
+
+if (!fsSupported()) {
+  fsBtn.style.display = "none"; // e.g. iPhone Safari has no fullscreen API
+} else {
+  fsBtn.addEventListener("click", () => (fsActive() ? exitFullscreen() : enterFullscreen()));
+}
+
+// In landscape on a touch device, go fullscreen on the first tap so the
+// browser chrome doesn't eat part of the game.
+let fsAutoTried = false;
+addEventListener("pointerdown", () => {
+  if (fsAutoTried || fsActive() || !fsSupported()) return;
+  if (matchMedia("(orientation: landscape)").matches && matchMedia("(pointer: coarse)").matches) {
+    fsAutoTried = true;
+    enterFullscreen();
+  }
+}, { capture: true });
+matchMedia("(orientation: landscape)").addEventListener?.("change", () => (fsAutoTried = false));
 
 // Keyboard fallback for desktop testing.
 const keys = {};
 addEventListener("keydown", (e) => {
-  if (!keys[e.code] && e.code === "Space") input.jumpBuffer = 0.15;
+  if (!keys[e.code]) {
+    if (e.code === "Space") input.jumpBuffer = 0.15;
+    if (e.code === "KeyR") becomeRock();
+  }
   keys[e.code] = true;
 });
 addEventListener("keyup", (e) => (keys[e.code] = false));
@@ -139,54 +193,84 @@ document.addEventListener("touchmove", (e) => e.preventDefault(), { passive: fal
 document.addEventListener("dblclick", (e) => e.preventDefault());
 
 // ---------- perimeter geometry ----------
-// The blob's center travels along the platform's rectangle expanded
-// outward by the blob radius, with quarter-circle arcs at the corners.
-// t is arc length, clockwise from the top-left corner of the top edge.
+// Platforms may be rotated, so all rectangle math happens in the
+// platform's local frame, where the rect spans (0,0)-(w,h); results
+// are rotated back to world space. The blob's center travels along
+// the rectangle expanded outward by the blob radius, with
+// quarter-circle arcs at the corners. t is arc length, clockwise
+// from the top-left corner of the top edge.
+
+function toLocal(p, wx, wy) {
+  const c = Math.cos(p.angle), s = Math.sin(p.angle);
+  const dx = wx - (p.x + p.w / 2), dy = wy - (p.y + p.h / 2);
+  return { x: dx * c + dy * s + p.w / 2, y: -dx * s + dy * c + p.h / 2 };
+}
+
+function toWorld(p, lx, ly) {
+  const c = Math.cos(p.angle), s = Math.sin(p.angle);
+  const dx = lx - p.w / 2, dy = ly - p.h / 2;
+  return { x: dx * c - dy * s + p.x + p.w / 2, y: dx * s + dy * c + p.y + p.h / 2 };
+}
+
+function rotToWorld(p, vx, vy) {
+  const c = Math.cos(p.angle), s = Math.sin(p.angle);
+  return { x: vx * c - vy * s, y: vx * s + vy * c };
+}
 
 function perimeterLength(p, r) {
   return 2 * (p.w + p.h) + 2 * Math.PI * r;
 }
 
-function pointOnPerimeter(p, r, t) {
+// Point + outward normal at arc length t, in the local frame.
+function localPointOnPerimeter(p, r, t) {
   const arc = (Math.PI * r) / 2;
   const total = perimeterLength(p, r);
   t = ((t % total) + total) % total;
   let s = t;
 
-  if (s < p.w) return { x: p.x + s, y: p.y - r, nx: 0, ny: -1 };                       // top
+  if (s < p.w) return { x: s, y: -r, nx: 0, ny: -1 };                                   // top
   s -= p.w;
   if (s < arc) {                                                                        // top-right corner
     const a = -Math.PI / 2 + (s / arc) * (Math.PI / 2);
-    return { x: p.x + p.w + Math.cos(a) * r, y: p.y + Math.sin(a) * r, nx: Math.cos(a), ny: Math.sin(a) };
+    return { x: p.w + Math.cos(a) * r, y: Math.sin(a) * r, nx: Math.cos(a), ny: Math.sin(a) };
   }
   s -= arc;
-  if (s < p.h) return { x: p.x + p.w + r, y: p.y + s, nx: 1, ny: 0 };                   // right
+  if (s < p.h) return { x: p.w + r, y: s, nx: 1, ny: 0 };                               // right
   s -= p.h;
   if (s < arc) {                                                                        // bottom-right corner
     const a = (s / arc) * (Math.PI / 2);
-    return { x: p.x + p.w + Math.cos(a) * r, y: p.y + p.h + Math.sin(a) * r, nx: Math.cos(a), ny: Math.sin(a) };
+    return { x: p.w + Math.cos(a) * r, y: p.h + Math.sin(a) * r, nx: Math.cos(a), ny: Math.sin(a) };
   }
   s -= arc;
-  if (s < p.w) return { x: p.x + p.w - s, y: p.y + p.h + r, nx: 0, ny: 1 };             // bottom
+  if (s < p.w) return { x: p.w - s, y: p.h + r, nx: 0, ny: 1 };                         // bottom
   s -= p.w;
   if (s < arc) {                                                                        // bottom-left corner
     const a = Math.PI / 2 + (s / arc) * (Math.PI / 2);
-    return { x: p.x + Math.cos(a) * r, y: p.y + p.h + Math.sin(a) * r, nx: Math.cos(a), ny: Math.sin(a) };
+    return { x: Math.cos(a) * r, y: p.h + Math.sin(a) * r, nx: Math.cos(a), ny: Math.sin(a) };
   }
   s -= arc;
-  if (s < p.h) return { x: p.x - r, y: p.y + p.h - s, nx: -1, ny: 0 };                  // left
+  if (s < p.h) return { x: -r, y: p.h - s, nx: -1, ny: 0 };                             // left
   s -= p.h;
   const a = Math.PI + (s / arc) * (Math.PI / 2);                                        // top-left corner
-  return { x: p.x + Math.cos(a) * r, y: p.y + Math.sin(a) * r, nx: Math.cos(a), ny: Math.sin(a) };
+  return { x: Math.cos(a) * r, y: Math.sin(a) * r, nx: Math.cos(a), ny: Math.sin(a) };
 }
 
-// Arc-length t of the perimeter point nearest to world point (cx, cy).
-function nearestT(p, r, cx, cy) {
+function pointOnPerimeter(p, r, t) {
+  const l = localPointOnPerimeter(p, r, t);
+  const w = toWorld(p, l.x, l.y);
+  const n = rotToWorld(p, l.nx, l.ny);
+  return { x: w.x, y: w.y, nx: n.x, ny: n.y };
+}
+
+// Arc-length t of the perimeter point nearest to world point (wx, wy).
+function nearestT(p, r, wx, wy) {
+  const lc = toLocal(p, wx, wy);
+  const cx = lc.x, cy = lc.y;
   const arc = (Math.PI * r) / 2;
-  const qx = Math.max(p.x, Math.min(p.x + p.w, cx));
-  const qy = Math.max(p.y, Math.min(p.y + p.h, cy));
-  const onRight = qx === p.x + p.w, onLeft = qx === p.x;
-  const onBottom = qy === p.y + p.h, onTop = qy === p.y;
+  const qx = Math.max(0, Math.min(p.w, cx));
+  const qy = Math.max(0, Math.min(p.h, cy));
+  const onRight = qx === p.w, onLeft = qx === 0;
+  const onBottom = qy === p.h, onTop = qy === 0;
   const corner = (a0, base) => {
     let a = Math.atan2(cy - qy, cx - qx) - a0;
     a = ((a % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
@@ -198,10 +282,23 @@ function nearestT(p, r, cx, cy) {
   if (onBottom && onRight && cx >= qx && cy >= qy) return corner(0, p.w + arc + p.h);
   if (onBottom && onLeft && cx <= qx && cy >= qy) return corner(Math.PI / 2, 2 * p.w + arc * 2 + p.h);
   if (onTop && onLeft && cx <= qx && cy <= qy) return corner(Math.PI, 2 * p.w + arc * 3 + 2 * p.h);
-  if (onTop && cy <= qy) return qx - p.x;
-  if (onRight && cx >= qx) return p.w + arc + (qy - p.y);
-  if (onBottom && cy >= qy) return p.w + arc + p.h + arc + (p.x + p.w - qx);
-  return 2 * p.w + p.h + 3 * arc + (p.y + p.h - qy); // left edge
+  if (onTop && cy <= qy) return qx;
+  if (onRight && cx >= qx) return p.w + arc + qy;
+  if (onBottom && cy >= qy) return p.w + arc + p.h + arc + (p.w - qx);
+  return 2 * p.w + p.h + 3 * arc + (p.h - qy); // left edge
+}
+
+// Closest point on (rotated) platform p to world point, plus outward
+// normal and distance. Used by both sticking and rock collisions.
+function surfaceInfo(p, wx, wy) {
+  const lc = toLocal(p, wx, wy);
+  const qx = Math.max(0, Math.min(p.w, lc.x));
+  const qy = Math.max(0, Math.min(p.h, lc.y));
+  const dx = lc.x - qx, dy = lc.y - qy;
+  const d = Math.hypot(dx, dy);
+  if (d === 0) return { d: 0, nx: 0, ny: -1 };
+  const n = rotToWorld(p, dx / d, dy / d);
+  return { d, nx: n.x, ny: n.y };
 }
 
 // ---------- particles ----------
@@ -258,8 +355,34 @@ function resetLevel() {
   blob.noStickTimer = 0;
   blob.state = "alive";
   blob.stateTimer = 0;
+  blob.form = "blob";
+  blob.rockTimer = 0;
+  blob.vtx = 0; blob.vty = 0;
   star.taken = false;
   hideBanner();
+}
+
+const ROCK_DURATION = 3;
+
+function becomeRock() {
+  if (blob.state !== "alive" || blob.form !== "blob") return;
+  if (blob.attached) {
+    // Carry the crawl momentum into the roll.
+    blob.vx = blob.vtx;
+    blob.vy = blob.vty;
+    blob.attached = null;
+  }
+  blob.form = "rock";
+  blob.rockTimer = ROCK_DURATION;
+  blob.squash = 0;
+  burst(blob.x, blob.y, ["#b8a58c", "#8d7a60", "#ffffff"], 10, 220, 80);
+}
+
+function revertToBlob() {
+  blob.form = "blob";
+  blob.squash = -0.3; // pop back with a stretch
+  blob.noStickTimer = 0;
+  burst(blob.x, blob.y, ["#b8ff66", "#6fdd2e", "#ffffff"], 10, 220, 80);
 }
 
 function die() {
@@ -280,15 +403,11 @@ function win() {
 
 // ---------- physics ----------
 
-function tryStick(prevX, prevY) {
+function tryStick() {
   if (blob.noStickTimer > 0) return;
   for (const p of platforms) {
-    const qx = Math.max(p.x, Math.min(p.x + p.w, blob.x));
-    const qy = Math.max(p.y, Math.min(p.y + p.h, blob.y));
-    let dx = blob.x - qx, dy = blob.y - qy;
-    let d = Math.hypot(dx, dy);
-    if (d >= blob.r && d > 0) continue;
-    if (d === 0) { dx = blob.x - prevX; dy = blob.y - prevY; d = Math.hypot(dx, dy) || 1; dx = -dx; dy = -dy; }
+    const s = surfaceInfo(p, blob.x, blob.y);
+    if (s.d >= blob.r && s.d > 0) continue;
     // Stick!
     blob.attached = p;
     blob.t = nearestT(p, blob.r, blob.x, blob.y);
@@ -300,6 +419,45 @@ function tryStick(prevX, prevY) {
     blob.vx = 0; blob.vy = 0;
     return;
   }
+}
+
+// Rock mode: plain rolling physics — gravity, bounce a little,
+// keep tangential momentum so slopes accelerate the roll.
+function updateRock(dt) {
+  blob.vy += GRAVITY * dt;
+  blob.x += blob.vx * dt;
+  blob.y += blob.vy * dt;
+
+  let grounded = false;
+  for (const p of platforms) {
+    const s = surfaceInfo(p, blob.x, blob.y);
+    if (s.d === 0 || s.d >= blob.r) continue;
+    grounded = true;
+    // Push out of the surface.
+    blob.x += s.nx * (blob.r - s.d);
+    blob.y += s.ny * (blob.r - s.d);
+    // Split velocity into normal + tangential parts.
+    const vn = blob.vx * s.nx + blob.vy * s.ny;
+    if (vn < 0) {
+      const bounce = 1.15; // 1 = kill normal velocity, extra 0.15 = slight bounce
+      blob.vx -= s.nx * vn * bounce;
+      blob.vy -= s.ny * vn * bounce;
+    }
+    // Gentle rolling friction on what's left.
+    const f = Math.exp(-0.5 * dt);
+    blob.vx *= f;
+    blob.vy *= f;
+    blob.nx = s.nx; blob.ny = s.ny;
+  }
+
+  // Spin the sprite with the roll.
+  const spinSpeed = grounded
+    ? (blob.vx * -blob.ny + blob.vy * blob.nx) // tangential speed on the surface
+    : blob.vx;
+  blob.rot += (spinSpeed / blob.r) * dt;
+
+  blob.rockTimer -= dt;
+  if (blob.rockTimer <= 0) revertToBlob();
 }
 
 function update(dt) {
@@ -325,7 +483,9 @@ function update(dt) {
     return;
   }
 
-  if (blob.attached) {
+  if (blob.form === "rock") {
+    updateRock(dt);
+  } else if (blob.attached) {
     const p = blob.attached;
     // Crawl: project stick input onto the surface tangent (clockwise = (-ny, nx)).
     const tx = -blob.ny, ty = blob.nx;
@@ -334,6 +494,9 @@ function update(dt) {
     const pt = pointOnPerimeter(p, blob.r, blob.t);
     blob.x = pt.x; blob.y = pt.y;
     blob.nx = pt.nx; blob.ny = pt.ny;
+    // Remember crawl velocity so turning to rock keeps the momentum.
+    blob.vtx = along * CRAWL_SPEED * tx;
+    blob.vty = along * CRAWL_SPEED * ty;
 
     if (input.jumpBuffer > 0) {
       input.jumpBuffer = 0;
@@ -352,10 +515,9 @@ function update(dt) {
     blob.vx += input.x * AIR_ACCEL * dt;
     blob.vx = Math.max(-AIR_MAX, Math.min(AIR_MAX, blob.vx));
     blob.vy += GRAVITY * dt;
-    const prevX = blob.x, prevY = blob.y;
     blob.x += blob.vx * dt;
     blob.y += blob.vy * dt;
-    tryStick(prevX, prevY);
+    tryStick();
   }
 
   // Star pickup.
@@ -378,11 +540,16 @@ const cam = { x: SPAWN.x, y: SPAWN.y };
 function cameraTransform() {
   const cw = canvas.width / devicePixelRatio;
   const ch = canvas.height / devicePixelRatio;
-  const zoom = Math.max(ch / VIEW_H, cw / WORLD.w);
+  // Landscape screens are short: show fewer world units vertically so
+  // the game doesn't shrink to a miniature.
+  const viewH = ch >= cw ? VIEW_H : 430;
+  const zoom = Math.max(ch / viewH, cw / WORLD.w);
   const vw = cw / zoom, vh = ch / zoom;
 
   cam.x += (blob.x - cam.x) * 0.12;
-  cam.y += (blob.y - 60 - cam.y) * 0.12;
+  // Aim a touch below the blob so it rides above screen center,
+  // clear of the touch controls at the bottom.
+  cam.y += (blob.y + vh * 0.08 - cam.y) * 0.12;
 
   const cx = Math.max(vw / 2, Math.min(WORLD.w - vw / 2, cam.x));
   const cy = Math.max(vh / 2, Math.min(WORLD.h - vh / 2, cam.y));
@@ -451,15 +618,19 @@ function drawBackground(cm, time) {
 }
 
 function drawPlatform(p) {
+  ctx.save();
+  ctx.translate(p.x + p.w / 2, p.y + p.h / 2);
+  ctx.rotate(p.angle);
+  const x = -p.w / 2, y = -p.h / 2;
   // Body.
-  roundRect(p.x, p.y, p.w, p.h, 14);
+  roundRect(x, y, p.w, p.h, 14);
   ctx.fillStyle = p.color;
   ctx.fill();
   ctx.lineWidth = 5;
   ctx.strokeStyle = "rgba(0,40,80,0.35)";
   ctx.stroke();
   // Glossy top highlight.
-  roundRect(p.x + 6, p.y + 5, p.w - 12, Math.min(14, p.h * 0.3), 8);
+  roundRect(x + 6, y + 5, p.w - 12, Math.min(14, p.h * 0.3), 8);
   ctx.fillStyle = "rgba(255,255,255,0.45)";
   ctx.fill();
   // Cartoon dots.
@@ -467,10 +638,11 @@ function drawPlatform(p) {
   for (let dx = 22; dx < p.w - 12; dx += 44) {
     for (let dy = 26; dy < p.h - 10; dy += 40) {
       ctx.beginPath();
-      ctx.arc(p.x + dx, p.y + dy, 5, 0, Math.PI * 2);
+      ctx.arc(x + dx, y + dy, 5, 0, Math.PI * 2);
       ctx.fill();
     }
   }
+  ctx.restore();
 }
 
 function drawStar(time) {
@@ -494,7 +666,71 @@ function drawStar(time) {
   ctx.restore();
 }
 
+function drawRock() {
+  const b = blob;
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  if (b.state === "dead") ctx.globalAlpha = Math.max(0, 1 - b.stateTimer / 1.2);
+  // Blink white just before reverting.
+  const flashing = b.rockTimer < 0.6 && Math.sin(b.rockTimer * 25) > 0;
+  ctx.rotate(b.rot);
+
+  // Lumpy boulder outline.
+  ctx.beginPath();
+  const N = 12;
+  for (let i = 0; i <= N; i++) {
+    const a = (i / N) * Math.PI * 2;
+    const rr = b.r * (1 + 0.08 * Math.sin(a * 4 + 1.7) + 0.05 * Math.cos(a * 3));
+    i === 0 ? ctx.moveTo(Math.cos(a) * rr, Math.sin(a) * rr) : ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+  }
+  ctx.closePath();
+  const grad = ctx.createRadialGradient(-8, -10, 4, 0, 0, b.r * 1.3);
+  if (flashing) {
+    grad.addColorStop(0, "#f4ffe8");
+    grad.addColorStop(1, "#c3d9ae");
+  } else {
+    grad.addColorStop(0, "#c9bda8");
+    grad.addColorStop(0.55, "#9c8c72");
+    grad.addColorStop(1, "#6f6049");
+  }
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = flashing ? "#8fb573" : "#4e4434";
+  ctx.stroke();
+
+  // Cracks and speckles so the spin is visible.
+  ctx.strokeStyle = "rgba(60,50,35,0.55)";
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(-b.r * 0.5, -b.r * 0.15);
+  ctx.lineTo(-b.r * 0.1, 0);
+  ctx.lineTo(-b.r * 0.25, b.r * 0.4);
+  ctx.moveTo(b.r * 0.2, -b.r * 0.5);
+  ctx.lineTo(b.r * 0.45, -b.r * 0.1);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(255,255,255,0.25)";
+  for (const [sx, sy] of [[-0.3, -0.55], [0.55, 0.25], [0.05, 0.55]]) {
+    ctx.beginPath();
+    ctx.arc(b.r * sx, b.r * sy, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Squinting determined eyes — it's still our blob in there.
+  ctx.strokeStyle = "#3a3226";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-b.r * 0.42, -b.r * 0.18);
+  ctx.lineTo(-b.r * 0.16, -b.r * 0.22);
+  ctx.moveTo(b.r * 0.16, -b.r * 0.22);
+  ctx.lineTo(b.r * 0.42, -b.r * 0.18);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
 function drawBlob(time) {
+  if (blob.form === "rock") { drawRock(); return; }
   const b = blob;
   ctx.save();
   ctx.translate(b.x, b.y);
@@ -648,6 +884,12 @@ function draw(time) {
 function resize() {
   canvas.width = innerWidth * devicePixelRatio;
   canvas.height = innerHeight * devicePixelRatio;
+  // Orientation / fullscreen changes move and resize the stick's home;
+  // drop the cached position and inline overrides so CSS re-applies.
+  joyHome = null;
+  joyBase.style.left = "";
+  joyBase.style.top = "";
+  joyBase.style.bottom = "";
 }
 addEventListener("resize", resize);
 resize();
