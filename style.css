@@ -101,6 +101,11 @@ html, body {
   opacity: 0.75;
 }
 
+.pad-btn.rock {
+  background: radial-gradient(circle at 35% 30%, #d7c6ae, #a08a6b 60%, #77644a);
+  font-size: 24px;
+}
+
 #btn-top   { left: 68px; top: 0; }
 #btn-left  { left: 0;    top: 68px; }
 #btn-right { right: 0;   top: 68px; }
@@ -112,6 +117,42 @@ html, body {
   bottom: 0;
   font-size: 32px;
   background: radial-gradient(circle at 35% 30%, #ffb3c8, #ff5d8f 60%, #e53170);
+}
+
+/* ---------- fullscreen button ---------- */
+
+#btn-fs {
+  position: fixed;
+  top: calc(12px + env(safe-area-inset-top));
+  right: calc(12px + env(safe-area-inset-right));
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border: 3px solid rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
+  text-shadow: 0 2px 4px rgba(0, 40, 80, 0.4);
+  touch-action: none;
+  z-index: 15;
+}
+
+#btn-fs:active {
+  transform: scale(0.9);
+}
+
+/* ---------- compact controls on short (landscape phone) screens ---------- */
+
+@media (max-height: 500px) {
+  #joy-base { width: 104px; height: 104px; }
+  #joy-knob { width: 46px; height: 46px; }
+  #btn-cluster { width: 164px; height: 164px; }
+  .pad-btn { width: 52px; height: 52px; font-size: 20px; }
+  .pad-btn.rock { font-size: 19px; }
+  #btn-top { left: 56px; }
+  #btn-left, #btn-right { top: 56px; }
+  .pad-btn.jump { width: 62px; height: 62px; left: 51px; font-size: 26px; }
 }
 
 /* ---------- banner messages ---------- */
