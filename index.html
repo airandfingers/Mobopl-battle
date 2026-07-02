@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#4ec9f5">
+  <title>Blob Hop!</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='55' r='42' fill='%236fdd2e' stroke='%232e8f0f' stroke-width='6'/><circle cx='36' cy='45' r='9' fill='white'/><circle cx='64' cy='45' r='9' fill='white'/><circle cx='38' cy='47' r='4'/><circle cx='66' cy='47' r='4'/></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- Left: virtual movement stick -->
+  <div id="joy-zone">
+    <div id="joy-base">
+      <div id="joy-knob"></div>
+    </div>
+  </div>
+
+  <!-- Right: button cluster (bottom one jumps) -->
+  <div id="btn-cluster">
+    <button class="pad-btn dead" id="btn-top"    aria-label="unused">★</button>
+    <button class="pad-btn dead" id="btn-left"   aria-label="unused">✦</button>
+    <button class="pad-btn dead" id="btn-right"  aria-label="unused">◆</button>
+    <button class="pad-btn jump" id="btn-jump"   aria-label="jump">▲</button>
+  </div>
+
+  <div id="banner"></div>
+
+  <script src="game.js"></script>
+</body>
+</html>
