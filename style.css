@@ -41,21 +41,21 @@ html, body {
 
 #joy-base {
   position: absolute;
-  width: 128px;
-  height: 128px;
-  left: calc(24px + env(safe-area-inset-left));
-  bottom: calc(32px + env(safe-area-inset-bottom));
+  width: 100px;
+  height: 100px;
+  left: calc(12px + env(safe-area-inset-left));
+  bottom: calc(12px + env(safe-area-inset-bottom));
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.22);
-  border: 4px solid rgba(255, 255, 255, 0.55);
+  border: 3px solid rgba(255, 255, 255, 0.55);
   box-shadow: 0 4px 14px rgba(0, 40, 80, 0.25);
   backdrop-filter: blur(2px);
 }
 
 #joy-knob {
   position: absolute;
-  width: 58px;
-  height: 58px;
+  width: 46px;
+  height: 46px;
   left: 50%;
   top: 50%;
   border-radius: 50%;
@@ -70,21 +70,21 @@ html, body {
 
 #btn-cluster {
   position: fixed;
-  right: calc(18px + env(safe-area-inset-right));
-  bottom: calc(24px + env(safe-area-inset-bottom));
-  width: 200px;
-  height: 200px;
+  right: calc(10px + env(safe-area-inset-right));
+  bottom: calc(10px + env(safe-area-inset-bottom));
+  width: 160px;
+  height: 160px;
   touch-action: none;
   z-index: 10;
 }
 
 .pad-btn {
   position: absolute;
-  width: 64px;
-  height: 64px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
   border: 3px solid rgba(255, 255, 255, 0.85);
-  font-size: 26px;
+  font-size: 20px;
   line-height: 1;
   color: rgba(255, 255, 255, 0.95);
   box-shadow: 0 4px 10px rgba(0, 40, 80, 0.3), inset 0 -4px 0 rgba(0, 0, 0, 0.15);
@@ -103,19 +103,25 @@ html, body {
 
 .pad-btn.rock {
   background: radial-gradient(circle at 35% 30%, #d7c6ae, #a08a6b 60%, #77644a);
-  font-size: 24px;
+  font-size: 19px;
 }
 
-#btn-top   { left: 68px; top: 0; }
-#btn-left  { left: 0;    top: 68px; }
-#btn-right { right: 0;   top: 68px; }
+.pad-btn.dash {
+  background: radial-gradient(circle at 35% 30%, #a5e8ff, #38b6e8 60%, #1a86c9);
+  font-size: 26px;
+  font-weight: bold;
+}
+
+#btn-top   { left: 54px; top: 0; }
+#btn-left  { left: 0;    top: 54px; }
+#btn-right { right: 0;   top: 54px; }
 
 .pad-btn.jump {
-  width: 76px;
-  height: 76px;
-  left: 62px;
+  width: 62px;
+  height: 62px;
+  left: 49px;
   bottom: 0;
-  font-size: 32px;
+  font-size: 26px;
   background: radial-gradient(circle at 35% 30%, #ffb3c8, #ff5d8f 60%, #e53170);
 }
 
@@ -145,14 +151,15 @@ html, body {
 /* ---------- compact controls on short (landscape phone) screens ---------- */
 
 @media (max-height: 500px) {
-  #joy-base { width: 104px; height: 104px; }
-  #joy-knob { width: 46px; height: 46px; }
-  #btn-cluster { width: 164px; height: 164px; }
-  .pad-btn { width: 52px; height: 52px; font-size: 20px; }
-  .pad-btn.rock { font-size: 19px; }
-  #btn-top { left: 56px; }
-  #btn-left, #btn-right { top: 56px; }
-  .pad-btn.jump { width: 62px; height: 62px; left: 51px; font-size: 26px; }
+  #joy-base { width: 84px; height: 84px; }
+  #joy-knob { width: 38px; height: 38px; }
+  #btn-cluster { width: 136px; height: 136px; }
+  .pad-btn { width: 44px; height: 44px; font-size: 17px; }
+  .pad-btn.rock { font-size: 16px; }
+  .pad-btn.dash { font-size: 21px; }
+  #btn-top { left: 46px; }
+  #btn-left, #btn-right { top: 46px; }
+  .pad-btn.jump { width: 54px; height: 54px; left: 41px; font-size: 22px; }
 }
 
 /* ---------- banner messages ---------- */

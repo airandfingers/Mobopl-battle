@@ -15,12 +15,15 @@ const banner = document.getElementById("banner");
 
 const WORLD = { w: 1920, h: 1080 };
 const WATER_Y = 960;
-const VIEW_H = 620;            // world units of height we aim to show
+const VIEW_H = 850;            // world units of height to show (portrait)
+const VIEW_H_LANDSCAPE = 610;
 const GRAVITY = 1800;
 const CRAWL_SPEED = 300;       // speed along a platform surface
 const AIR_ACCEL = 1700;
 const AIR_MAX = 400;
 const JUMP_SPEED = 800;
+const DASH_SPEED = 1500;
+const DASH_TIME = 0.11;        // ~165 world px — a bit shorter than a jump
 
 const PALETTE = ["#ff8a3d", "#a86bff", "#ff5d8f", "#3ddc84", "#ffd93b", "#4ec9f5"];
 
@@ -61,6 +64,9 @@ const blob = {
   rockTimer: 0,      // seconds left as a rock
   rot: 0,            // rock rolling rotation
   vtx: 0, vty: 0,    // current crawl velocity (for momentum when turning to rock)
+  dashTimer: 0,      // seconds of dash left
+  dashCooldown: 0,
+  faceX: 1, faceY: 0, // last stick direction, for dashing with a neutral stick
 };
 
 // ---------- input ----------
@@ -91,7 +97,7 @@ joyZone.addEventListener("pointerdown", (e) => {
     const r = joyBase.getBoundingClientRect();
     joyHome = { left: r.left - zr.left, top: r.top - zr.top, w: r.width, h: r.height };
   }
-  joyRadius = joyHome.w / 2 - 16;
+  joyRadius = joyHome.w / 2 - 14;
   // Re-center the stick under the thumb (base is positioned relative to the zone).
   joyBase.style.left = e.clientX - zr.left - joyHome.w / 2 + "px";
   joyBase.style.top = e.clientY - zr.top - joyHome.h / 2 + "px";
@@ -127,7 +133,12 @@ document.getElementById("btn-top").addEventListener("pointerdown", (e) => {
   becomeRock();
 });
 
-// The left and right buttons intentionally do nothing (yet).
+document.getElementById("btn-right").addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  startDash();
+});
+
+// The left button intentionally does nothing (yet).
 
 // ---------- fullscreen ----------
 
@@ -173,19 +184,21 @@ addEventListener("keydown", (e) => {
   if (!keys[e.code]) {
     if (e.code === "Space") input.jumpBuffer = 0.15;
     if (e.code === "KeyR") becomeRock();
+    if (e.code === "KeyF") startDash();
   }
   keys[e.code] = true;
 });
 addEventListener("keyup", (e) => (keys[e.code] = false));
 
 function keyboardStick() {
-  if (joyPointer !== null) return;
+  if (joyPointer !== null) return; // the touch stick owns the input while held
   let x = 0, y = 0;
   if (keys["ArrowLeft"] || keys["KeyA"]) x -= 1;
   if (keys["ArrowRight"] || keys["KeyD"]) x += 1;
   if (keys["ArrowUp"] || keys["KeyW"]) y -= 1;
   if (keys["ArrowDown"] || keys["KeyS"]) y += 1;
-  if (x || y || (input.x === 0 && input.y === 0)) { input.x = x; input.y = y; }
+  input.x = x;
+  input.y = y;
 }
 
 // Block page zoom / scroll gestures.
@@ -358,8 +371,27 @@ function resetLevel() {
   blob.form = "blob";
   blob.rockTimer = 0;
   blob.vtx = 0; blob.vty = 0;
+  blob.dashTimer = 0;
+  blob.dashCooldown = 0;
+  blob.faceX = 1; blob.faceY = 0;
   star.taken = false;
   hideBanner();
+}
+
+function startDash() {
+  if (blob.state !== "alive" || blob.form !== "blob") return;
+  if (blob.dashTimer > 0 || blob.dashCooldown > 0) return;
+  // Dash where the stick points; fall back to the last direction held.
+  let dx = input.x, dy = input.y;
+  if (Math.hypot(dx, dy) < 0.25) { dx = blob.faceX; dy = blob.faceY; }
+  const len = Math.hypot(dx, dy) || 1;
+  blob.vx = (dx / len) * DASH_SPEED;
+  blob.vy = (dy / len) * DASH_SPEED;
+  blob.attached = null;
+  blob.dashTimer = DASH_TIME;
+  blob.dashCooldown = 0.4;
+  blob.squash = 0;
+  burst(blob.x, blob.y, ["#ffffff", "#b8ff66", "#8fdcff"], 8, 180, 40);
 }
 
 const ROCK_DURATION = 3;
@@ -403,21 +435,53 @@ function win() {
 
 // ---------- physics ----------
 
+function stickTo(p) {
+  blob.attached = p;
+  blob.t = nearestT(p, blob.r, blob.x, blob.y);
+  const pt = pointOnPerimeter(p, blob.r, blob.t);
+  blob.x = pt.x; blob.y = pt.y;
+  blob.nx = pt.nx; blob.ny = pt.ny;
+  const impact = Math.abs(blob.vx * pt.nx + blob.vy * pt.ny);
+  blob.squash = Math.min(0.45, impact / 1400);
+  blob.vx = 0; blob.vy = 0;
+}
+
 function tryStick() {
   if (blob.noStickTimer > 0) return;
   for (const p of platforms) {
     const s = surfaceInfo(p, blob.x, blob.y);
     if (s.d >= blob.r && s.d > 0) continue;
-    // Stick!
-    blob.attached = p;
-    blob.t = nearestT(p, blob.r, blob.x, blob.y);
-    const pt = pointOnPerimeter(p, blob.r, blob.t);
-    blob.x = pt.x; blob.y = pt.y;
-    blob.nx = pt.nx; blob.ny = pt.ny;
-    const impact = Math.abs(blob.vx * pt.nx + blob.vy * pt.ny);
-    blob.squash = Math.min(0.45, impact / 1400);
-    blob.vx = 0; blob.vy = 0;
+    stickTo(p);
     return;
+  }
+}
+
+// Dash: a straight, gravity-free burst. Hitting a platform head-on
+// ends the dash by sticking to it; grazing along a surface doesn't.
+function updateDash(dt) {
+  blob.dashTimer -= dt;
+  blob.x += blob.vx * dt;
+  blob.y += blob.vy * dt;
+  // Afterimage trail.
+  particles.push({
+    x: blob.x, y: blob.y, vx: 0, vy: 0, r: blob.r * 0.7,
+    color: "rgba(184,255,102,0.4)", life: 0.18, age: 0,
+  });
+
+  for (const p of platforms) {
+    const s = surfaceInfo(p, blob.x, blob.y);
+    if (s.d === 0 || s.d >= blob.r) continue;
+    if (blob.vx * s.nx + blob.vy * s.ny < 0) {
+      blob.dashTimer = 0;
+      stickTo(p);
+      return;
+    }
+  }
+
+  if (blob.dashTimer <= 0) {
+    // Keep a gentle carry so the dash doesn't stop dead mid-air.
+    blob.vx *= 0.25;
+    blob.vy *= 0.25;
   }
 }
 
@@ -464,6 +528,12 @@ function update(dt) {
   keyboardStick();
   input.jumpBuffer = Math.max(0, input.jumpBuffer - dt);
   blob.noStickTimer = Math.max(0, blob.noStickTimer - dt);
+  blob.dashCooldown = Math.max(0, blob.dashCooldown - dt);
+  if (Math.hypot(input.x, input.y) > 0.3) {
+    const l = Math.hypot(input.x, input.y);
+    blob.faceX = input.x / l;
+    blob.faceY = input.y / l;
+  }
   blob.squash *= Math.pow(0.001, dt); // spring back to round
   blob.blink -= dt;
   if (blob.blink < -3) blob.blink = 0.13 + Math.random() * 0.1;
@@ -485,6 +555,8 @@ function update(dt) {
 
   if (blob.form === "rock") {
     updateRock(dt);
+  } else if (blob.dashTimer > 0) {
+    updateDash(dt);
   } else if (blob.attached) {
     const p = blob.attached;
     // Crawl: project stick input onto the surface tangent (clockwise = (-ny, nx)).
@@ -542,7 +614,7 @@ function cameraTransform() {
   const ch = canvas.height / devicePixelRatio;
   // Landscape screens are short: show fewer world units vertically so
   // the game doesn't shrink to a miniature.
-  const viewH = ch >= cw ? VIEW_H : 430;
+  const viewH = ch >= cw ? VIEW_H : VIEW_H_LANDSCAPE;
   const zoom = Math.max(ch / viewH, cw / WORLD.w);
   const vw = cw / zoom, vh = ch / zoom;
 
@@ -735,10 +807,14 @@ function drawBlob(time) {
   ctx.save();
   ctx.translate(b.x, b.y);
 
-  // Orient squash along the surface normal (or vertical in the air).
-  const ang = b.attached ? Math.atan2(b.ny, b.nx) + Math.PI / 2 : 0;
+  // Orient squash along the surface normal (or vertical in the air);
+  // while dashing, stretch along the direction of travel instead.
+  const dashing = b.dashTimer > 0;
+  const ang = dashing
+    ? Math.atan2(b.vy, b.vx) + Math.PI / 2
+    : b.attached ? Math.atan2(b.ny, b.nx) + Math.PI / 2 : 0;
   ctx.rotate(ang);
-  const sq = b.squash;
+  const sq = dashing ? -0.35 : b.squash;
   ctx.scale(1 + sq * 0.9, 1 - sq);
 
   const wob = 1 + Math.sin(time * 6) * 0.03;
