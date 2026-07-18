@@ -17,6 +17,26 @@ On touch devices in landscape, the game goes fullscreen on your first tap (where
 
 Desktop fallback: arrow keys / WASD to move, Space to jump, R to turn to rock, F to dash.
 
+## 🎧 Headphone / media-button controls
+
+Tap the **🎧 button** (top-right, under ⛶) to route your headphones' media
+buttons into the game via the Media Session API:
+
+- **Play/pause** → jump
+- **Next track** (double-press on many headsets) → dash
+- **Previous track** (triple-press on many headsets) → rock
+
+While enabled, the page loops an inaudible audio track — that's what makes the
+browser treat the game as the active "media player" and deliver the button
+events (it also means your phone may pause whatever music was playing, and
+you'll see a "Blob Hop!" entry in the system media notification). Tap 🎧 again
+to turn it off.
+
+Keyboard media keys (⏯ ⏭ ⏮) work the same way on desktop.
+
+Not mappable: **volume buttons** and **assistant gestures** — the OS consumes
+those itself and never delivers them to a web page.
+
 ## Running locally
 
 It's a static site — serve the folder with anything:

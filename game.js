@@ -178,6 +178,102 @@ addEventListener("pointerdown", () => {
 }, { capture: true });
 matchMedia("(orientation: landscape)").addEventListener?.("change", () => (fsAutoTried = false));
 
+// ---------- headphone / media-button controls ----------
+// Hardware media buttons (headset play/pause, Bluetooth track skip,
+// keyboard ⏯ ⏭ ⏮) reach a web page through the Media Session API,
+// but only while the page is actively playing audio. Toggling 🎧 on
+// loops a ~10 s inaudible WAV so the browser treats us as the active
+// media session and routes the buttons here:
+//   play / pause   -> jump
+//   next track     -> dash      (double-press on many headsets)
+//   previous track -> rock      (triple-press on many headsets)
+// Volume buttons and assistant gestures are consumed by the OS and
+// are never delivered to the page, so they can't be mapped.
+
+const hpBtn = document.getElementById("btn-hp");
+let hpAudio = null;
+let hpOn = false;
+
+// Build a 10-second, single-channel WAV of a ~-55 dBFS 50 Hz sine —
+// effectively silent, but not muted, so the media session engages.
+function quietLoopURL() {
+  const rate = 8000, secs = 10, n = rate * secs;
+  const buf = new ArrayBuffer(44 + n * 2);
+  const v = new DataView(buf);
+  const tag = (off, s) => { for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i)); };
+  tag(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); tag(8, "WAVE");
+  tag(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  tag(36, "data"); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) {
+    v.setInt16(44 + i * 2, Math.sin((i * 2 * Math.PI * 50) / rate) * 60, true);
+  }
+  return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+}
+
+function hpAction(fn) {
+  return () => {
+    fn();
+    // Stay "playing" no matter which button fired, so the OS keeps
+    // sending events instead of considering us paused.
+    navigator.mediaSession.playbackState = "playing";
+  };
+}
+
+function hpSetHandlers(on) {
+  const map = {
+    play: hpAction(() => (input.jumpBuffer = 0.15)),
+    pause: hpAction(() => (input.jumpBuffer = 0.15)),
+    nexttrack: hpAction(startDash),
+    previoustrack: hpAction(becomeRock),
+  };
+  for (const [action, handler] of Object.entries(map)) {
+    try {
+      navigator.mediaSession.setActionHandler(action, on ? handler : null);
+    } catch {
+      // Action not supported by this browser — fine, skip it.
+    }
+  }
+}
+
+function hpEnable() {
+  if (!hpAudio) {
+    hpAudio = new Audio(quietLoopURL());
+    hpAudio.loop = true;
+  }
+  // play() must run inside the tap's gesture to satisfy autoplay rules.
+  hpAudio.play().then(() => {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: "Blob Hop!",
+      artist: "⏯ jump · ⏭ dash · ⏮ rock",
+    });
+    navigator.mediaSession.playbackState = "playing";
+    hpSetHandlers(true);
+    hpOn = true;
+    hpBtn.classList.add("on");
+    showBanner("🎧 ⏯ = JUMP", "#b8ff66");
+    setTimeout(hideBanner, 1800);
+  }).catch(() => {
+    showBanner("🎧 BLOCKED", "#ff5d8f");
+    setTimeout(hideBanner, 1800);
+  });
+}
+
+function hpDisable() {
+  hpAudio.pause();
+  hpSetHandlers(false);
+  navigator.mediaSession.playbackState = "none";
+  navigator.mediaSession.metadata = null;
+  hpOn = false;
+  hpBtn.classList.remove("on");
+}
+
+if ("mediaSession" in navigator && typeof MediaMetadata !== "undefined") {
+  hpBtn.addEventListener("click", () => (hpOn ? hpDisable() : hpEnable()));
+} else {
+  hpBtn.style.display = "none";
+}
+
 // Keyboard fallback for desktop testing.
 const keys = {};
 addEventListener("keydown", (e) => {

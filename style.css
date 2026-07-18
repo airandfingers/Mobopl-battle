@@ -127,7 +127,8 @@ html, body {
 
 /* ---------- fullscreen button ---------- */
 
-#btn-fs {
+#btn-fs,
+#btn-hp {
   position: fixed;
   top: calc(12px + env(safe-area-inset-top));
   right: calc(12px + env(safe-area-inset-right));
@@ -144,8 +145,22 @@ html, body {
   z-index: 15;
 }
 
-#btn-fs:active {
+#btn-fs:active,
+#btn-hp:active {
   transform: scale(0.9);
+}
+
+/* ---------- headphone media-button toggle ---------- */
+
+#btn-hp {
+  top: calc(66px + env(safe-area-inset-top));
+  font-size: 20px;
+}
+
+#btn-hp.on {
+  background: rgba(111, 221, 46, 0.55);
+  border-color: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 0 12px rgba(111, 221, 46, 0.8);
 }
 
 /* ---------- compact controls on short (landscape phone) screens ---------- */
