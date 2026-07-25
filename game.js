@@ -138,6 +138,42 @@ const LEVELS = [
       { type: "fly",  x: 4690, y: 400, ampX: 0,   ampY: 80, speed: 2.4 },
     ],
   },
+  {
+    // Hurdle course: rows of poodles doing push-ups on long runways.
+    // They rise and sink with each rep — time your jump over them
+    // (or bowl them over as a rock). No fox: this one's about jumps.
+    name: "Poodle Push-ups",
+    world: { w: 4700, h: 1080 },
+    waterY: 960,
+    spawn: { x: 160, y: 780 },
+    star: { x: 4330, y: 620 },
+    platforms: [
+      { x: 60,   y: 840, w: 240, h: 60 },                   // start
+      { x: 380,  y: 820, w: 700, h: 60 },                   // runway 1
+      { x: 1280, y: 780, w: 800, h: 60 },                   // runway 2 (with a pair!)
+      { x: 2280, y: 660, w: 600, h: 60 },                   // terrace
+      { x: 3080, y: 760, w: 500, h: 60 },                   // runway 3
+      { x: 3780, y: 700, w: 600, h: 60 },                   // final stretch
+    ],
+    enemies: [
+      { type: "poodle", x: 500,  y: 820 },
+      { type: "poodle", x: 720,  y: 820 },
+      { type: "poodle", x: 950,  y: 820 },
+      { type: "poodle", x: 1400, y: 780 },
+      { type: "poodle", x: 1490, y: 780, phase: 2 },        // back-to-back pair
+      { type: "poodle", x: 1740, y: 780 },
+      { type: "poodle", x: 1960, y: 780 },
+      { type: "poodle", x: 2380, y: 660 },
+      { type: "poodle", x: 2580, y: 660 },
+      { type: "poodle", x: 2780, y: 660 },
+      { type: "poodle", x: 3180, y: 760 },
+      { type: "poodle", x: 3400, y: 760 },
+      { type: "poodle", x: 3880, y: 700 },
+      { type: "poodle", x: 4060, y: 700 },
+      { type: "poodle", x: 4240, y: 700 },
+    ],
+    noFox: true,
+  },
 ];
 
 for (const L of LEVELS) {
@@ -497,11 +533,12 @@ function resetLevel() {
   star.taken = false;
   cam.x = SPAWN.x; cam.y = SPAWN.y;
   // Respawn this level's enemies.
-  enemies = (LEVELS[levelIndex].enemies || []).map((d) =>
-    d.type === "walk"
-      ? { ...d, r: 20, speed: d.speed || 90, alive: true, x: d.x0, dir: 1, anim: Math.random() * 7 }
-      : { ...d, r: 20, alive: true, t: Math.random() * 7, fx: d.x, fy: d.y }
-  );
+  enemies = (LEVELS[levelIndex].enemies || []).map((d) => {
+    if (d.type === "walk") return { ...d, r: 20, speed: d.speed || 90, alive: true, x: d.x0, dir: 1, anim: Math.random() * 7 };
+    if (d.type === "fly") return { ...d, r: 20, alive: true, t: Math.random() * 7, fx: d.x, fy: d.y };
+    // poodle: stationary push-upper; py is the bobbing body center
+    return { ...d, r: 24, alive: true, phase: d.phase ?? Math.random() * 6, py: d.y - 26, dir: Math.random() < 0.5 ? -1 : 1 };
+  });
   hideBanner();
 }
 
@@ -622,14 +659,19 @@ function updateEnemies(dt) {
       e.x += e.dir * e.speed * dt;
       if (e.x > e.x1) { e.x = e.x1; e.dir = -1; }
       if (e.x < e.x0) { e.x = e.x0; e.dir = 1; }
-    } else {
+    } else if (e.type === "fly") {
       e.t += dt * e.speed;
       e.fx = e.x + Math.sin(e.t) * e.ampX;
       e.fy = e.y + Math.sin(e.t) * e.ampY;
+    } else {
+      // Push-up rep: body rises and sinks; taller at the top of a rep.
+      e.phase += dt * 2.4;
+      e.lift = (Math.sin(e.phase) * 0.5 + 0.5) * 34;
+      e.py = e.y - 26 - e.lift;
     }
     if (blob.state !== "alive") continue;
-    const ex = e.type === "walk" ? e.x : e.fx;
-    const ey = e.type === "walk" ? e.y : e.fy;
+    const ex = e.type === "fly" ? e.fx : e.x;
+    const ey = e.type === "walk" ? e.y : e.type === "fly" ? e.fy : e.py;
     if (Math.hypot(blob.x - ex, blob.y - ey) < blob.r + e.r - 6) {
       if (blob.form === "rock") {
         // Rocks squash critters.
@@ -964,9 +1006,112 @@ function drawStar(time) {
   ctx.restore();
 }
 
+// A poodle mid-push-up: paws planted, fluffy body rising and sinking
+// with each rep, topknot bouncing, face straining at the top.
+function drawPoodle(e) {
+  const lift = e.lift || 0;
+  const straining = lift > 24;
+  ctx.save();
+  ctx.translate(e.x, e.y); // platform top at the poodle's paws
+  ctx.scale(e.dir, 1);     // face left or right
+
+  const fluff = "#fff4e3", fluffDark = "#e8d5bd", outline = "#c9a988";
+
+  // Legs: straighten as the body rises.
+  ctx.strokeStyle = outline;
+  ctx.lineWidth = 6;
+  ctx.lineCap = "round";
+  for (const s of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(s * 18, -2);
+    ctx.lineTo(s * 14, -8 - lift * 0.8);
+    ctx.stroke();
+  }
+  // Paws.
+  ctx.fillStyle = fluffDark;
+  for (const s of [-1, 1]) {
+    ctx.beginPath();
+    ctx.ellipse(s * 19, -3, 7, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Body: horizontal cluster of fluff puffs.
+  const by = -26 - lift;
+  ctx.fillStyle = fluff;
+  ctx.strokeStyle = outline;
+  ctx.lineWidth = 3;
+  for (const [px, pr] of [[-14, 15], [0, 17], [13, 15]]) {
+    ctx.beginPath();
+    ctx.arc(px, by, pr, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.fillStyle = fluff;
+  ctx.beginPath();
+  ctx.ellipse(0, by, 26, 14, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Pom tail.
+  ctx.beginPath();
+  ctx.arc(-30, by - 8, 8, 0, Math.PI * 2);
+  ctx.fillStyle = fluff;
+  ctx.fill();
+  ctx.stroke();
+
+  // Head at the front: muzzle, nose, droopy ear, topknot pom.
+  const hx = 26, hy = by - 8;
+  ctx.beginPath();
+  ctx.arc(hx, hy, 12, 0, Math.PI * 2);
+  ctx.fillStyle = fluff;
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.ellipse(hx + 10, hy + 3, 7, 5, 0, 0, Math.PI * 2);
+  ctx.fillStyle = fluffDark;
+  ctx.fill();
+  ctx.fillStyle = "#3a2a1c";
+  ctx.beginPath();
+  ctx.arc(hx + 16, hy + 2, 3, 0, Math.PI * 2);
+  ctx.fill();
+  // Droopy ear.
+  ctx.beginPath();
+  ctx.ellipse(hx - 6, hy + 9, 5, 9, 0.3, 0, Math.PI * 2);
+  ctx.fillStyle = fluffDark;
+  ctx.fill();
+  ctx.stroke();
+  // Topknot bounces opposite the body.
+  ctx.beginPath();
+  ctx.arc(hx + 2, hy - 14 + lift * 0.15, 8, 0, Math.PI * 2);
+  ctx.fillStyle = fluff;
+  ctx.fill();
+  ctx.stroke();
+
+  // Face: strains at the top of a rep, cheerful otherwise.
+  ctx.strokeStyle = "#243040";
+  ctx.lineWidth = 2.2;
+  if (straining) {
+    ctx.beginPath(); // squeezed-shut eye
+    ctx.moveTo(hx + 1, hy - 4);
+    ctx.lineTo(hx + 7, hy - 3);
+    ctx.stroke();
+    ctx.fillStyle = "#ff9db8"; // little tongue out
+    ctx.beginPath();
+    ctx.ellipse(hx + 12, hy + 9, 3, 4.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.fillStyle = "#243040";
+    ctx.beginPath();
+    ctx.arc(hx + 4, hy - 3, 2.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
 function drawEnemies(time) {
   for (const e of enemies) {
     if (!e.alive) continue;
+    if (e.type === "poodle") { drawPoodle(e); continue; }
     const ex = e.type === "walk" ? e.x : e.fx;
     const ey = e.type === "walk" ? e.y : e.fy;
     ctx.save();
