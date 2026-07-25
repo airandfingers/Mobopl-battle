@@ -15,7 +15,8 @@ A mobile-first, full-screen platformer where you play a sticky green blob.
 - Don't fall in the water! A splash resets the level.
 - Grab the ⭐ to clear the level and move on to the next.
 - **Four levels:** Green Hills (a friendly warm-up), The Gauntlet — a long, hard run of precision hops, a ceiling traverse, dash-only gaps, a floating wall-shaft climb, and a rock-ramp ride — Enemy Level, a jump-heavy course full of critters with a bay only a flying fox can cross — and Poodle Push-ups, a hurdle course over rows of poodles mid-workout: they rise and sink with every rep, so time your jumps (no fox here either). No checkpoints; falling sends you back to the start of the level.
-- Tap the level label in the top-left corner to skip to the next level.
+- Tap the level label in the top-left corner to open the level selector (with a little chime) and jump to any level. Desktop: number keys 1–4.
+- Air control is direct: while jumping, your sideways speed follows the stick — let go to stop mid-air, push the other way to turn straight around.
 
 On touch devices in landscape, the game goes fullscreen on your first tap (where the browser supports it); the ⛶ button in the top-right corner toggles fullscreen any time.
 
