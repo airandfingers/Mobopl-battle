@@ -5,7 +5,7 @@ A mobile-first, full-screen platformer where you play a sticky green blob.
 ## How to play
 
 - **Left side:** virtual movement stick (appears under your thumb).
-- **Right side:** four buttons — the **bottom (pink ▲) button jumps**, the **top (🪨) button turns you into a rock** for 3 seconds, the **right (blue ») button dashes** in the direction the stick is pointing, and the **left (🦊) button turns you into a flying fox** for 4 seconds.
+- **Right side:** four buttons — the **bottom (pink ▲) button jumps**, the **top (🪨) button turns you into a rock** for 3 seconds, the **right (blue ») button dashes** in the direction the stick is pointing, and the **left (🦊) button turns you into a flying fox** for 2.5 seconds.
 - A **dash** is a quick, straight, gravity-free burst — shorter than a jump. Hit a platform mid-dash and you stop, stuck to it.
 - The **flying fox** flies freely: steer with the stick, tap jump to flap upward. Touching a platform lands and turns you back; so does the timer running out. (Locked in The Gauntlet — that one must be earned.)
 - **Enemies** patrol platforms and buzz through the air. Touch one and you pop — unless you're a rock, which squashes them flat.
