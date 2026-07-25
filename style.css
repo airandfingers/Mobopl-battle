@@ -112,6 +112,16 @@ html, body {
   font-weight: bold;
 }
 
+.pad-btn.fox {
+  background: radial-gradient(circle at 35% 30%, #ffd9a8, #ff9d3d 60%, #e0701a);
+  font-size: 19px;
+}
+
+.pad-btn.locked {
+  filter: grayscale(1);
+  opacity: 0.45;
+}
+
 #btn-top   { left: 54px; top: 0; }
 #btn-left  { left: 0;    top: 54px; }
 #btn-right { right: 0;   top: 54px; }
@@ -157,6 +167,7 @@ html, body {
   .pad-btn { width: 44px; height: 44px; font-size: 17px; }
   .pad-btn.rock { font-size: 16px; }
   .pad-btn.dash { font-size: 21px; }
+  .pad-btn.fox { font-size: 16px; }
   #btn-top { left: 46px; }
   #btn-left, #btn-right { top: 46px; }
   .pad-btn.jump { width: 54px; height: 54px; left: 41px; font-size: 22px; }
@@ -176,7 +187,7 @@ html, body {
     -1px -1px 0 rgba(0, 60, 110, 0.45),
     0 3px 8px rgba(0, 40, 80, 0.3);
   letter-spacing: 1px;
-  pointer-events: none;
+  cursor: pointer;
   z-index: 15;
 }
 
