@@ -11,7 +11,8 @@ A mobile-first, full-screen platformer where you play a sticky green blob.
 - Jumping launches you away from the surface; steer the launch with the stick.
 - As a **rock** you can't steer or jump — you keep your momentum and roll, and slopes speed you up. Some platforms are angled just for this.
 - Don't fall in the water! A splash resets the level.
-- Grab the ⭐ to win.
+- Grab the ⭐ to clear the level and move on to the next.
+- **Two levels:** Green Hills (a friendly warm-up) and The Gauntlet — a long, hard run of precision hops, a ceiling traverse, dash-only gaps, a floating wall-shaft climb, and a rock-ramp ride. No checkpoints; falling sends you back to the start of the level.
 
 On touch devices in landscape, the game goes fullscreen on your first tap (where the browser supports it); the ⛶ button in the top-right corner toggles fullscreen any time.
 

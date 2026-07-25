@@ -13,8 +13,6 @@ const banner = document.getElementById("banner");
 
 // ---------- world ----------
 
-const WORLD = { w: 1920, h: 1080 };
-const WATER_Y = 960;
 const VIEW_H = 850;            // world units of height to show (portrait)
 const VIEW_H_LANDSCAPE = 610;
 const GRAVITY = 1800;
@@ -27,29 +25,79 @@ const DASH_TIME = 0.11;        // ~165 world px — a bit shorter than a jump
 
 const PALETTE = ["#ff8a3d", "#a86bff", "#ff5d8f", "#3ddc84", "#ffd93b", "#4ec9f5"];
 
-// Platforms: rectangles the blob can stick to; `angle` (radians,
-// rotation about the rect center, positive = right end tips down)
-// makes a slope that rocks roll down.
-const platforms = [
-  { x: 60,   y: 840, w: 260, h: 70 },
-  { x: 430,  y: 750, w: 180, h: 56 },
-  { x: 700,  y: 630, w: 170, h: 56 },
-  { x: 960,  y: 380, w: 80,  h: 430 },                  // tall wall — crawl up the side!
-  { x: 1130, y: 330, w: 200, h: 56, angle: 0.14 },      // tilted — rocks roll off to the right
-  { x: 1330, y: 130, w: 320, h: 56 },                   // ceiling stretch — hang underneath
-  { x: 1470, y: 550, w: 180, h: 56 },
-  { x: 1580, y: 638, w: 240, h: 44, angle: Math.PI / 4 }, // steep ramp down to the star
-  { x: 1740, y: 760, w: 180, h: 62 },
+// Levels. Platforms are rectangles the blob can stick to; `angle`
+// (radians, rotation about the rect center, positive = right end tips
+// down) makes a slope that rocks roll down.
+const LEVELS = [
+  {
+    name: "Green Hills",
+    world: { w: 1920, h: 1080 },
+    waterY: 960,
+    spawn: { x: 170, y: 780 },
+    star: { x: 1830, y: 690 },
+    platforms: [
+      { x: 60,   y: 840, w: 260, h: 70 },
+      { x: 430,  y: 750, w: 180, h: 56 },
+      { x: 700,  y: 630, w: 170, h: 56 },
+      { x: 960,  y: 380, w: 80,  h: 430 },                  // tall wall — crawl up the side!
+      { x: 1130, y: 330, w: 200, h: 56, angle: 0.14 },      // tilted — rocks roll off to the right
+      { x: 1330, y: 130, w: 320, h: 56 },                   // ceiling stretch — hang underneath
+      { x: 1470, y: 550, w: 180, h: 56 },
+      { x: 1580, y: 638, w: 240, h: 44, angle: Math.PI / 4 }, // steep ramp down to the star
+      { x: 1740, y: 760, w: 180, h: 62 },
+    ],
+  },
+  {
+    // A long gauntlet: precision hops, a ceiling traverse, dash-only
+    // gaps, a floating wall-shaft climb, and a rock-ramp run.
+    name: "The Gauntlet",
+    world: { w: 7400, h: 1080 },
+    waterY: 960,
+    spawn: { x: 160, y: 780 },
+    star: { x: 7230, y: 750 },
+    platforms: [
+      { x: 60,   y: 840, w: 260, h: 60 },                   // start
+      // A: precision hops over open water
+      { x: 540,  y: 820, w: 90,  h: 44 },
+      { x: 900,  y: 780, w: 80,  h: 44 },
+      { x: 1290, y: 820, w: 80,  h: 44 },
+      // B: ceiling traverse
+      { x: 1630, y: 800, w: 120, h: 50 },
+      { x: 1800, y: 640, w: 700, h: 50 },                   // hang under this
+      { x: 2540, y: 820, w: 120, h: 50 },                   // drop-off landing
+      // C: dash gaps (too wide for a plain jump)
+      { x: 2920, y: 780, w: 100, h: 50 },
+      { x: 3380, y: 760, w: 90,  h: 50 },
+      { x: 3860, y: 760, w: 90,  h: 50 },
+      { x: 4340, y: 740, w: 90,  h: 50 },
+      // D: floating wall shaft — leap wall to wall, crawl up
+      { x: 4700, y: 500, w: 70,  h: 380 },
+      { x: 4980, y: 300, w: 70,  h: 380 },
+      { x: 5150, y: 140, w: 500, h: 50 },                   // high ceiling run
+      // E: rock-ramp run — turn to rock and ride the slopes
+      { x: 5700, y: 400, w: 220, h: 50, angle: 0.3 },
+      { x: 6020, y: 560, w: 220, h: 50, angle: 0.3 },
+      { x: 6340, y: 720, w: 220, h: 50, angle: 0.3 },
+      { x: 6680, y: 860, w: 200, h: 60 },                   // catch platform
+      // F: one last leap
+      { x: 7180, y: 820, w: 100, h: 50 },
+    ],
+  },
 ];
-platforms.forEach((p, i) => { p.angle = p.angle || 0; p.color = PALETTE[i % PALETTE.length]; });
 
-const star = { x: 1830, y: 690, r: 26, taken: false, spin: 0 };
-const SPAWN = { x: 170, y: 780 };
+for (const L of LEVELS) {
+  L.platforms.forEach((p, i) => { p.angle = p.angle || 0; p.color = PALETTE[i % PALETTE.length]; });
+  L.star = { ...L.star, r: 26, taken: false, spin: 0 };
+}
+
+// Current-level state, populated by loadLevel().
+let levelIndex = 0;
+let WORLD, WATER_Y, platforms, star, SPAWN;
 
 // ---------- blob state ----------
 
 const blob = {
-  x: SPAWN.x, y: SPAWN.y,
+  x: 0, y: 0, // positioned by loadLevel() -> resetLevel()
   vx: 0, vy: 0,
   r: 26,
   attached: null,    // platform we're stuck to (null = airborne)
@@ -347,12 +395,15 @@ function updateParticles(dt) {
 
 // ---------- game flow ----------
 
-function showBanner(text, color) {
+let bannerTimeout = null;
+function showBanner(text, color, ttl) {
   banner.textContent = text;
   banner.style.color = color || "#fff";
   banner.classList.remove("show");
   void banner.offsetWidth; // restart the pop animation
   banner.classList.add("show");
+  clearTimeout(bannerTimeout);
+  if (ttl) bannerTimeout = setTimeout(hideBanner, ttl);
 }
 
 function hideBanner() {
@@ -375,7 +426,20 @@ function resetLevel() {
   blob.dashCooldown = 0;
   blob.faceX = 1; blob.faceY = 0;
   star.taken = false;
+  cam.x = SPAWN.x; cam.y = SPAWN.y;
   hideBanner();
+}
+
+function loadLevel(i) {
+  levelIndex = i;
+  const L = LEVELS[i];
+  WORLD = L.world;
+  WATER_Y = L.waterY;
+  SPAWN = L.spawn;
+  platforms = L.platforms;
+  star = L.star;
+  document.getElementById("hud").textContent = "LV " + (i + 1) + " · " + L.name;
+  resetLevel();
 }
 
 function startDash() {
@@ -430,7 +494,7 @@ function win() {
   blob.stateTimer = 0;
   star.taken = true;
   burst(star.x, star.y, PALETTE, 40, 500, 250);
-  showBanner("YOU WIN!", "#ffd93b");
+  showBanner(levelIndex === LEVELS.length - 1 ? "ALL CLEAR!" : "LEVEL CLEAR!", "#ffd93b");
 }
 
 // ---------- physics ----------
@@ -548,7 +612,10 @@ function update(dt) {
   }
   if (blob.state === "won") {
     blob.stateTimer += dt;
-    if (blob.stateTimer > 2.4) resetLevel();
+    if (blob.stateTimer > 2.4) {
+      loadLevel((levelIndex + 1) % LEVELS.length);
+      showBanner("LEVEL " + (levelIndex + 1), "#8fdcff", 1600);
+    }
     updateParticles(dt);
     return;
   }
@@ -607,7 +674,7 @@ function update(dt) {
 
 // ---------- camera ----------
 
-const cam = { x: SPAWN.x, y: SPAWN.y };
+const cam = { x: 0, y: 0 };
 
 function cameraTransform() {
   const cw = canvas.width / devicePixelRatio;
@@ -666,9 +733,11 @@ function drawBackground(cm, time) {
     ctx.stroke();
   }
 
-  // Parallax clouds.
+  // Parallax clouds (count scales with world width so long levels
+  // don't end up with empty skies).
   ctx.fillStyle = "rgba(255,255,255,0.9)";
-  for (let i = 0; i < 6; i++) {
+  const nClouds = Math.max(6, Math.ceil(WORLD.w / 340));
+  for (let i = 0; i < nClouds; i++) {
     const wx = ((i * 420 + time * 18 - cm.cx * 0.25) % (WORLD.w + 400)) - 200;
     const wy = 70 + ((i * 137) % 180);
     const s = 0.7 + (i % 3) * 0.3;
@@ -681,7 +750,8 @@ function drawBackground(cm, time) {
 
   // Distant hills.
   ctx.fillStyle = "#7ee29a";
-  for (let i = 0; i < 5; i++) {
+  const nHills = Math.max(5, Math.ceil(WORLD.w / 260));
+  for (let i = 0; i < nHills; i++) {
     const hx = ((i * 520 - cm.cx * 0.5) % (WORLD.w + 700)) - 250;
     ctx.beginPath();
     ctx.ellipse(hx, ch + 40, 300, 190 + (i % 2) * 70, 0, Math.PI, 0);
@@ -969,6 +1039,8 @@ function resize() {
 }
 addEventListener("resize", resize);
 resize();
+
+loadLevel(0);
 
 let last = performance.now();
 function frame(now) {
