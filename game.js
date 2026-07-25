@@ -22,6 +22,10 @@ const AIR_MAX = 400;
 const JUMP_SPEED = 800;
 const DASH_SPEED = 1500;
 const DASH_TIME = 0.11;        // ~165 world px — a bit shorter than a jump
+const FOX_DURATION = 4;        // seconds of flight
+const FOX_SPEED = 480;         // full-stick flight speed
+const FOX_SAG = 260;           // gentle downward pull while gliding
+const FOX_FLAP = 340;          // upward kick from the jump button
 
 const PALETTE = ["#ff8a3d", "#a86bff", "#ff5d8f", "#3ddc84", "#ffd93b", "#4ec9f5"];
 
@@ -82,6 +86,57 @@ const LEVELS = [
       // F: one last leap
       { x: 7180, y: 820, w: 100, h: 50 },
     ],
+    noFox: true, // the Gauntlet must be earned the hard way
+  },
+  {
+    // Jump-heavy course crawling with critters. Walkers patrol
+    // platform tops, flyers bob in the air. Touch one and you pop —
+    // unless you're a rock, which squashes them. The wide bay in the
+    // middle can only be crossed as a flying fox.
+    name: "Enemy Level",
+    world: { w: 5200, h: 1080 },
+    waterY: 960,
+    spawn: { x: 150, y: 780 },
+    star: { x: 4820, y: 430 },
+    platforms: [
+      { x: 60,   y: 840, w: 220, h: 60 },                   // start
+      // stair hops up, each guarded
+      { x: 420,  y: 760, w: 140, h: 50 },
+      { x: 700,  y: 660, w: 140, h: 50 },
+      { x: 980,  y: 560, w: 140, h: 50 },
+      // descent chain
+      { x: 1260, y: 640, w: 110, h: 50 },
+      { x: 1500, y: 720, w: 110, h: 50 },
+      // ...the great bay: fox flight only (790 gap)
+      { x: 2400, y: 600, w: 160, h: 50 },
+      // zigzag hops with flyers between
+      { x: 2700, y: 500, w: 130, h: 50 },
+      { x: 2980, y: 600, w: 130, h: 50 },
+      { x: 3260, y: 500, w: 130, h: 50 },
+      // low chain
+      { x: 3540, y: 700, w: 100, h: 50 },
+      { x: 3780, y: 780, w: 100, h: 50 },
+      { x: 4020, y: 700, w: 100, h: 50 },
+      // final tower
+      { x: 4300, y: 420, w: 80,  h: 420 },
+      { x: 4460, y: 380, w: 160, h: 50 },
+      { x: 4750, y: 500, w: 140, h: 50 },                   // star perch
+    ],
+    enemies: [
+      { type: "walk", x0: 430, x1: 550,  y: 740 },
+      { type: "walk", x0: 710, x1: 830,  y: 640 },
+      { type: "walk", x0: 990, x1: 1110, y: 540 },
+      { type: "walk", x0: 1270, x1: 1360, y: 620 },
+      { type: "fly",  x: 1430, y: 560, ampX: 0,   ampY: 90, speed: 2.2 },
+      { type: "fly",  x: 2480, y: 360, ampX: 110, ampY: 0,  speed: 1.6 },
+      { type: "walk", x0: 2710, x1: 2820, y: 480 },
+      { type: "fly",  x: 3060, y: 420, ampX: 0,   ampY: 110, speed: 2.6 },
+      { type: "walk", x0: 3270, x1: 3380, y: 480 },
+      { type: "walk", x0: 3790, x1: 3870, y: 760 },
+      { type: "fly",  x: 4180, y: 560, ampX: 0,   ampY: 130, speed: 2.0 },
+      { type: "walk", x0: 4470, x1: 4610, y: 360 },
+      { type: "fly",  x: 4690, y: 400, ampX: 0,   ampY: 80, speed: 2.4 },
+    ],
   },
 ];
 
@@ -93,6 +148,7 @@ for (const L of LEVELS) {
 // Current-level state, populated by loadLevel().
 let levelIndex = 0;
 let WORLD, WATER_Y, platforms, star, SPAWN;
+let enemies = []; // live instances, rebuilt on every reset
 
 // ---------- blob state ----------
 
@@ -108,8 +164,9 @@ const blob = {
   blink: 0,
   state: "alive",    // alive | dead | won
   stateTimer: 0,
-  form: "blob",      // blob | rock
+  form: "blob",      // blob | rock | fox
   rockTimer: 0,      // seconds left as a rock
+  foxTimer: 0,       // seconds left as a flying fox
   rot: 0,            // rock rolling rotation
   vtx: 0, vty: 0,    // current crawl velocity (for momentum when turning to rock)
   dashTimer: 0,      // seconds of dash left
@@ -186,7 +243,17 @@ document.getElementById("btn-right").addEventListener("pointerdown", (e) => {
   startDash();
 });
 
-// The left button intentionally does nothing (yet).
+document.getElementById("btn-left").addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  becomeFox();
+});
+
+// Tap the level label to skip ahead (handy for practicing a level).
+document.getElementById("hud").addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  loadLevel((levelIndex + 1) % LEVELS.length);
+  showBanner("LEVEL " + (levelIndex + 1), "#8fdcff", 1600);
+});
 
 // ---------- fullscreen ----------
 
@@ -233,6 +300,7 @@ addEventListener("keydown", (e) => {
     if (e.code === "Space") input.jumpBuffer = 0.15;
     if (e.code === "KeyR") becomeRock();
     if (e.code === "KeyF") startDash();
+    if (e.code === "KeyG") becomeFox();
   }
   keys[e.code] = true;
 });
@@ -425,8 +493,15 @@ function resetLevel() {
   blob.dashTimer = 0;
   blob.dashCooldown = 0;
   blob.faceX = 1; blob.faceY = 0;
+  blob.foxTimer = 0;
   star.taken = false;
   cam.x = SPAWN.x; cam.y = SPAWN.y;
+  // Respawn this level's enemies.
+  enemies = (LEVELS[levelIndex].enemies || []).map((d) =>
+    d.type === "walk"
+      ? { ...d, r: 20, speed: d.speed || 90, alive: true, x: d.x0, dir: 1, anim: Math.random() * 7 }
+      : { ...d, r: 20, alive: true, t: Math.random() * 7, fx: d.x, fy: d.y }
+  );
   hideBanner();
 }
 
@@ -439,6 +514,7 @@ function loadLevel(i) {
   platforms = L.platforms;
   star = L.star;
   document.getElementById("hud").textContent = "LV " + (i + 1) + " · " + L.name;
+  document.getElementById("btn-left").classList.toggle("locked", !!L.noFox);
   resetLevel();
 }
 
@@ -481,12 +557,89 @@ function revertToBlob() {
   burst(blob.x, blob.y, ["#b8ff66", "#6fdd2e", "#ffffff"], 10, 220, 80);
 }
 
-function die() {
+function becomeFox() {
+  if (blob.state !== "alive" || blob.form !== "blob") return;
+  if (LEVELS[levelIndex].noFox) return;
+  if (blob.attached) {
+    // Hop off the surface so we don't instantly land again.
+    blob.x += blob.nx * 3;
+    blob.y += blob.ny * 3;
+    blob.vx = blob.nx * 180 + blob.vtx;
+    blob.vy = blob.ny * 180 + blob.vty;
+    blob.attached = null;
+  }
+  blob.form = "fox";
+  blob.foxTimer = FOX_DURATION;
+  blob.dashTimer = 0;
+  blob.squash = 0;
+  burst(blob.x, blob.y, ["#ff9d3d", "#ffd9a8", "#ffffff"], 10, 220, 80);
+}
+
+// Flying fox: steer freely with the stick, gentle sag when idle,
+// flap upward with the jump button. Touching a platform lands and
+// reverts; the timer running out drops you back to blob mid-air.
+function updateFox(dt) {
+  blob.vx += (input.x * FOX_SPEED - blob.vx) * Math.min(1, 4 * dt);
+  blob.vy += (input.y * FOX_SPEED - blob.vy) * Math.min(1, 4 * dt) + FOX_SAG * dt;
+  if (input.jumpBuffer > 0) {
+    input.jumpBuffer = 0;
+    blob.vy = Math.max(blob.vy - FOX_FLAP, -FOX_SPEED);
+  }
+  blob.x += blob.vx * dt;
+  blob.y += blob.vy * dt;
+
+  for (const p of platforms) {
+    const s = surfaceInfo(p, blob.x, blob.y);
+    if (s.d === 0 || s.d >= blob.r) continue;
+    blob.form = "blob";
+    blob.foxTimer = 0;
+    stickTo(p);
+    return;
+  }
+
+  blob.foxTimer -= dt;
+  if (blob.foxTimer <= 0) revertToBlob();
+}
+
+function die(cause) {
   blob.state = "dead";
   blob.stateTimer = 0;
   blob.attached = null;
-  burst(blob.x, WATER_Y, ["#4ec9f5", "#8fdcff", "#ffffff", "#2a9fd8"], 26, 420, 350);
-  showBanner("SPLASH!", "#8fdcff");
+  if (cause === "enemy") {
+    burst(blob.x, blob.y, ["#ff5d8f", "#ffd93b", "#ffffff"], 24, 400, 150);
+    showBanner("OUCH!", "#ff9db8");
+  } else {
+    burst(blob.x, WATER_Y, ["#4ec9f5", "#8fdcff", "#ffffff", "#2a9fd8"], 26, 420, 350);
+    showBanner("SPLASH!", "#8fdcff");
+  }
+}
+
+function updateEnemies(dt) {
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    if (e.type === "walk") {
+      e.anim += dt * 9;
+      e.x += e.dir * e.speed * dt;
+      if (e.x > e.x1) { e.x = e.x1; e.dir = -1; }
+      if (e.x < e.x0) { e.x = e.x0; e.dir = 1; }
+    } else {
+      e.t += dt * e.speed;
+      e.fx = e.x + Math.sin(e.t) * e.ampX;
+      e.fy = e.y + Math.sin(e.t) * e.ampY;
+    }
+    if (blob.state !== "alive") continue;
+    const ex = e.type === "walk" ? e.x : e.fx;
+    const ey = e.type === "walk" ? e.y : e.fy;
+    if (Math.hypot(blob.x - ex, blob.y - ey) < blob.r + e.r - 6) {
+      if (blob.form === "rock") {
+        // Rocks squash critters.
+        e.alive = false;
+        burst(ex, ey, ["#a86bff", "#ff5d8f", "#ffffff"], 16, 320, 120);
+      } else {
+        die("enemy");
+      }
+    }
+  }
 }
 
 function win() {
@@ -602,6 +755,7 @@ function update(dt) {
   blob.blink -= dt;
   if (blob.blink < -3) blob.blink = 0.13 + Math.random() * 0.1;
   star.spin += dt * 2;
+  updateEnemies(dt); // moves critters; may kill or get squashed
 
   if (blob.state === "dead") {
     blob.stateTimer += dt;
@@ -622,6 +776,8 @@ function update(dt) {
 
   if (blob.form === "rock") {
     updateRock(dt);
+  } else if (blob.form === "fox") {
+    updateFox(dt);
   } else if (blob.dashTimer > 0) {
     updateDash(dt);
   } else if (blob.attached) {
@@ -808,6 +964,181 @@ function drawStar(time) {
   ctx.restore();
 }
 
+function drawEnemies(time) {
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    const ex = e.type === "walk" ? e.x : e.fx;
+    const ey = e.type === "walk" ? e.y : e.fy;
+    ctx.save();
+    ctx.translate(ex, ey);
+
+    if (e.type === "walk") {
+      const hop = Math.abs(Math.sin(e.anim)) * 4;
+      ctx.translate(0, -hop);
+      // Feet.
+      ctx.fillStyle = "#5d3fa8";
+      for (const s of [-1, 1]) {
+        ctx.beginPath();
+        ctx.ellipse(s * 9, e.r - 2 + hop, 7, 5, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else {
+      // Buzzing wings.
+      ctx.fillStyle = "rgba(255,255,255,0.75)";
+      const flap = Math.sin(time * 30 + e.t) * 0.5;
+      for (const s of [-1, 1]) {
+        ctx.beginPath();
+        ctx.ellipse(s * e.r * 0.9, -e.r * 0.5, 12, 6, s * (0.6 + flap), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Spiky round body.
+    ctx.beginPath();
+    const spikes = 10;
+    for (let i = 0; i <= spikes * 2; i++) {
+      const a = (i / (spikes * 2)) * Math.PI * 2;
+      const rr = i % 2 === 0 ? e.r : e.r * 0.78;
+      i === 0 ? ctx.moveTo(Math.cos(a) * rr, Math.sin(a) * rr) : ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+    }
+    ctx.closePath();
+    const grad = ctx.createRadialGradient(-5, -6, 3, 0, 0, e.r * 1.2);
+    grad.addColorStop(0, e.type === "walk" ? "#c99cff" : "#ff9db8");
+    grad.addColorStop(0.6, e.type === "walk" ? "#a86bff" : "#ff5d8f");
+    grad.addColorStop(1, e.type === "walk" ? "#7b3fd6" : "#d63f74");
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = e.type === "walk" ? "#4d2b91" : "#a12653";
+    ctx.stroke();
+
+    // Angry eyes.
+    const look = e.type === "walk" ? e.dir * 3 : Math.sin(e.t) * 2;
+    for (const s of [-1, 1]) {
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(s * 7 + look * 0.4, -3, 5.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#243040";
+      ctx.beginPath();
+      ctx.arc(s * 7 + look * 0.8, -3, 2.6, 0, Math.PI * 2);
+      ctx.fill();
+      // Angry brow.
+      ctx.strokeStyle = "#243040";
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(s * 3, -10);
+      ctx.lineTo(s * 11, -7);
+      ctx.stroke();
+    }
+    // Grumpy mouth.
+    ctx.strokeStyle = "#243040";
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(0, 10, 5, 1.2 * Math.PI, 1.8 * Math.PI);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+}
+
+function drawFox(time) {
+  const b = blob;
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  if (b.state === "dead") ctx.globalAlpha = Math.max(0, 1 - b.stateTimer / 1.2);
+  const flashing = b.foxTimer < 0.7 && Math.sin(b.foxTimer * 25) > 0;
+
+  // Lean into the direction of travel.
+  const lean = Math.atan2(b.vy, Math.abs(b.vx) + 60) * 0.5;
+  const facing = b.vx >= 0 ? 1 : -1;
+  ctx.scale(facing, 1);
+  ctx.rotate(lean * facing);
+  const bob = Math.sin(time * 9) * 2;
+  ctx.translate(0, bob);
+
+  // Glider membranes (stretch out sideways like a sugar glider).
+  ctx.fillStyle = flashing ? "#ffe9c9" : "#e0701a";
+  for (const s of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(-b.r * 0.7, s * 4);
+    ctx.quadraticCurveTo(0, s * b.r * 1.5 + Math.sin(time * 12) * 3, b.r * 0.8, s * 5);
+    ctx.quadraticCurveTo(0, s * b.r * 0.55, -b.r * 0.7, s * 4);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Fluffy tail.
+  ctx.strokeStyle = flashing ? "#fff3dd" : "#ff9d3d";
+  ctx.lineWidth = 9;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-b.r * 0.8, 2);
+  ctx.quadraticCurveTo(-b.r * 1.5, -6 + Math.sin(time * 7) * 6, -b.r * 2, 0);
+  ctx.stroke();
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(-b.r * 1.8, -1 + Math.sin(time * 7) * 1.5);
+  ctx.lineTo(-b.r * 2, 0);
+  ctx.stroke();
+  ctx.lineCap = "butt";
+
+  // Body.
+  ctx.beginPath();
+  ctx.ellipse(0, 0, b.r * 1.05, b.r * 0.8, 0, 0, Math.PI * 2);
+  const grad = ctx.createRadialGradient(-6, -8, 4, 0, 0, b.r * 1.3);
+  if (flashing) {
+    grad.addColorStop(0, "#fff6e6");
+    grad.addColorStop(1, "#ffd9a8");
+  } else {
+    grad.addColorStop(0, "#ffd9a8");
+    grad.addColorStop(0.55, "#ff9d3d");
+    grad.addColorStop(1, "#e0701a");
+  }
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = flashing ? "#e8b96f" : "#b3541a";
+  ctx.stroke();
+
+  // Ears.
+  for (const s of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(b.r * 0.25 + s * 0.1 * b.r, -b.r * 0.6);
+    ctx.lineTo(b.r * 0.45 + s * 0.22 * b.r, -b.r * 1.25);
+    ctx.lineTo(b.r * 0.72 + s * 0.1 * b.r, -b.r * 0.55);
+    ctx.closePath();
+    ctx.fillStyle = "#ff9d3d";
+    ctx.fill();
+    ctx.strokeStyle = "#b3541a";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+
+  // White snout + nose at the front.
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  ctx.ellipse(b.r * 0.72, b.r * 0.1, b.r * 0.42, b.r * 0.32, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#3a2a1c";
+  ctx.beginPath();
+  ctx.arc(b.r * 1.05, b.r * 0.05, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Eye (happy in flight).
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  ctx.arc(b.r * 0.4, -b.r * 0.15, 7.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#243040";
+  ctx.beginPath();
+  ctx.arc(b.r * 0.48, -b.r * 0.15, 3.8, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
 function drawRock() {
   const b = blob;
   ctx.save();
@@ -873,6 +1204,7 @@ function drawRock() {
 
 function drawBlob(time) {
   if (blob.form === "rock") { drawRock(); return; }
+  if (blob.form === "fox") { drawFox(time); return; }
   const b = blob;
   ctx.save();
   ctx.translate(b.x, b.y);
@@ -1020,6 +1352,7 @@ function draw(time) {
 
   for (const p of platforms) drawPlatform(p);
   drawStar(time);
+  drawEnemies(time);
   drawBlob(time);
   drawWater(cm, time);
   drawParticles();
