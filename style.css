@@ -191,6 +191,60 @@ html, body {
   z-index: 15;
 }
 
+/* ---------- level selector ---------- */
+
+#level-select {
+  position: fixed;
+  top: calc(42px + env(safe-area-inset-top));
+  left: calc(12px + env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.25);
+  border: 3px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 6px 18px rgba(0, 40, 80, 0.3);
+  backdrop-filter: blur(3px);
+  z-index: 16;
+  transform-origin: top left;
+  animation: select-pop 0.18s cubic-bezier(0.2, 1.5, 0.4, 1);
+}
+
+#level-select.hidden {
+  display: none;
+}
+
+@keyframes select-pop {
+  from { transform: scale(0.6); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+#level-select button {
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: bold;
+  text-align: left;
+  color: #1d5e8a;
+  background: rgba(255, 255, 255, 0.9);
+  border: 3px solid #4ec9f5;
+  border-radius: 12px;
+  padding: 8px 14px;
+  box-shadow: 0 3px 0 rgba(0, 40, 80, 0.2);
+  white-space: nowrap;
+}
+
+#level-select button:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 rgba(0, 40, 80, 0.2);
+}
+
+#level-select button.current {
+  background: #ffd93b;
+  border-color: #f5a623;
+  color: #7a4a00;
+}
+
 /* ---------- banner messages ---------- */
 
 #banner {

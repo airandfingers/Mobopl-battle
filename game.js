@@ -17,8 +17,8 @@ const VIEW_H = 850;            // world units of height to show (portrait)
 const VIEW_H_LANDSCAPE = 610;
 const GRAVITY = 1800;
 const CRAWL_SPEED = 300;       // speed along a platform surface
-const AIR_ACCEL = 1700;
 const AIR_MAX = 400;
+const AIR_RESPONSE = 12;       // how quickly airborne vx follows the stick
 const JUMP_SPEED = 800;
 const DASH_SPEED = 1500;
 const DASH_TIME = 0.11;        // ~165 world px — a bit shorter than a jump
@@ -284,11 +284,65 @@ document.getElementById("btn-left").addEventListener("pointerdown", (e) => {
   becomeFox();
 });
 
-// Tap the level label to skip ahead (handy for practicing a level).
+// ---------- chimes ----------
+
+let audioCtx = null;
+
+// A quick ascending arpeggio of soft triangle-wave notes.
+function playChime(notes) {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    notes.forEach((freq, i) => {
+      const t = audioCtx.currentTime + i * 0.07;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = "triangle";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.2, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t);
+      osc.stop(t + 0.4);
+    });
+  } catch (_) { /* no audio available — play on silently */ }
+}
+
+const CHIME_OPEN = [523.25, 659.25, 783.99];            // C5 E5 G5
+const CHIME_SELECT = [523.25, 659.25, 783.99, 1046.5];  // C5 E5 G5 C6
+
+// ---------- level selector ----------
+
+const selectPanel = document.getElementById("level-select");
+
+function selectLevel(i) {
+  playChime(CHIME_SELECT);
+  loadLevel(i);
+  showBanner("LEVEL " + (i + 1), "#8fdcff", 1600);
+  selectPanel.classList.add("hidden");
+}
+
+LEVELS.forEach((L, i) => {
+  const b = document.createElement("button");
+  b.textContent = (i + 1) + " · " + L.name;
+  b.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    selectLevel(i);
+  });
+  selectPanel.appendChild(b);
+});
+
+// Tap the level label to open/close the selector.
 document.getElementById("hud").addEventListener("pointerdown", (e) => {
   e.preventDefault();
-  loadLevel((levelIndex + 1) % LEVELS.length);
-  showBanner("LEVEL " + (levelIndex + 1), "#8fdcff", 1600);
+  const opening = selectPanel.classList.contains("hidden");
+  if (opening) {
+    playChime(CHIME_OPEN);
+    [...selectPanel.children].forEach((b, i) => b.classList.toggle("current", i === levelIndex));
+  }
+  selectPanel.classList.toggle("hidden", !opening);
 });
 
 // ---------- fullscreen ----------
@@ -337,6 +391,8 @@ addEventListener("keydown", (e) => {
     if (e.code === "KeyR") becomeRock();
     if (e.code === "KeyF") startDash();
     if (e.code === "KeyG") becomeFox();
+    const digit = /^Digit([1-9])$/.exec(e.code);
+    if (digit && +digit[1] <= LEVELS.length) selectLevel(+digit[1] - 1);
   }
   keys[e.code] = true;
 });
@@ -848,9 +904,10 @@ function update(dt) {
       blob.squash = -0.35; // stretch on launch
     }
   } else {
-    // Airborne.
-    blob.vx += input.x * AIR_ACCEL * dt;
-    blob.vx = Math.max(-AIR_MAX, Math.min(AIR_MAX, blob.vx));
+    // Airborne: velocity follows the stick directly, so releasing it
+    // stops you mid-air and reversing turns you straight around —
+    // no carried momentum.
+    blob.vx += (input.x * AIR_MAX - blob.vx) * Math.min(1, AIR_RESPONSE * dt);
     blob.vy += GRAVITY * dt;
     blob.x += blob.vx * dt;
     blob.y += blob.vy * dt;
