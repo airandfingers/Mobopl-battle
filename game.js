@@ -174,17 +174,62 @@ const LEVELS = [
     ],
     noFox: true,
   },
+  {
+    // Rooftop city crossed by long fox flights. Red blobs in hats
+    // hang from the overpasses and snipe arrows at you, and the
+    // rooftop poodles do sky-high reps. No rock here — you can't
+    // squash anything, only dodge. The fox lasts three times longer.
+    name: "Fox City",
+    world: { w: 5400, h: 1080 },
+    waterY: 960,
+    spawn: { x: 170, y: 720 },
+    star: { x: 5010, y: 620 },
+    theme: "city",
+    // Warm, saturated towers so they pop against the cool skyline.
+    palette: ["#e0705a", "#f5c86e", "#7fd4c1", "#c9a0e8", "#ff9d6e"],
+    foxTime: 7.5,
+    noRock: true,
+    platforms: [
+      // towers rising out of the canal (tops are the rooftops)
+      { x: 60,   y: 780, w: 240, h: 180 },
+      { x: 800,  y: 700, w: 220, h: 260 },
+      { x: 1600, y: 760, w: 280, h: 200 },
+      { x: 2500, y: 640, w: 300, h: 320 },
+      { x: 3400, y: 740, w: 300, h: 220 },
+      { x: 4100, y: 600, w: 280, h: 360 },
+      { x: 4900, y: 700, w: 240, h: 260 },
+      // overpasses the snipers hang from
+      { x: 600,  y: 220, w: 900,  h: 60 },
+      { x: 2400, y: 180, w: 1000, h: 60 },
+      { x: 4000, y: 200, w: 800,  h: 60 },
+    ],
+    enemies: [
+      { type: "shooter", x: 1080, y: 280 },
+      { type: "shooter", x: 1380, y: 280 },
+      { type: "poodle",  x: 1820, y: 760, liftAmp: 110 },
+      { type: "shooter", x: 2550, y: 240 },
+      { type: "shooter", x: 2900, y: 240 },
+      { type: "shooter", x: 3250, y: 240 },
+      { type: "poodle",  x: 2740, y: 640, liftAmp: 110 },
+      { type: "poodle",  x: 3640, y: 740, liftAmp: 110 },
+      { type: "poodle",  x: 4320, y: 600, liftAmp: 110, phase: 2.5 },
+      { type: "shooter", x: 4150, y: 260 },
+      { type: "shooter", x: 4500, y: 260 },
+    ],
+  },
 ];
 
 for (const L of LEVELS) {
-  L.platforms.forEach((p, i) => { p.angle = p.angle || 0; p.color = PALETTE[i % PALETTE.length]; });
+  const pal = L.palette || PALETTE;
+  L.platforms.forEach((p, i) => { p.angle = p.angle || 0; p.color = pal[i % pal.length]; });
   L.star = { ...L.star, r: 26, taken: false, spin: 0 };
 }
 
 // Current-level state, populated by loadLevel().
 let levelIndex = 0;
 let WORLD, WATER_Y, platforms, star, SPAWN;
-let enemies = []; // live instances, rebuilt on every reset
+let enemies = [];     // live instances, rebuilt on every reset
+let projectiles = []; // arrows in flight
 
 // ---------- blob state ----------
 
@@ -592,9 +637,11 @@ function resetLevel() {
   enemies = (LEVELS[levelIndex].enemies || []).map((d) => {
     if (d.type === "walk") return { ...d, r: 20, speed: d.speed || 90, alive: true, x: d.x0, dir: 1, anim: Math.random() * 7 };
     if (d.type === "fly") return { ...d, r: 20, alive: true, t: Math.random() * 7, fx: d.x, fy: d.y };
+    if (d.type === "shooter") return { ...d, r: 20, alive: true, cooldown: 0.6 + Math.random() * 2.2, wob: Math.random() * 7 };
     // poodle: stationary push-upper; py is the bobbing body center
     return { ...d, r: 24, alive: true, phase: d.phase ?? Math.random() * 6, py: d.y - 26, dir: Math.random() < 0.5 ? -1 : 1 };
   });
+  projectiles = [];
   hideBanner();
 }
 
@@ -608,6 +655,7 @@ function loadLevel(i) {
   star = L.star;
   document.getElementById("hud").textContent = "LV " + (i + 1) + " · " + L.name;
   document.getElementById("btn-left").classList.toggle("locked", !!L.noFox);
+  document.getElementById("btn-top").classList.toggle("locked", !!L.noRock);
   resetLevel();
 }
 
@@ -631,6 +679,7 @@ const ROCK_DURATION = 3;
 
 function becomeRock() {
   if (blob.state !== "alive" || blob.form !== "blob") return;
+  if (LEVELS[levelIndex].noRock) return;
   if (blob.attached) {
     // Carry the crawl momentum into the roll.
     blob.vx = blob.vtx;
@@ -653,6 +702,7 @@ function revertToBlob() {
 function becomeFox() {
   if (blob.state !== "alive" || blob.form !== "blob") return;
   if (LEVELS[levelIndex].noFox) return;
+  const foxTime = LEVELS[levelIndex].foxTime || FOX_DURATION;
   if (blob.attached) {
     // Hop off the surface so we don't instantly land again.
     blob.x += blob.nx * 3;
@@ -662,7 +712,7 @@ function becomeFox() {
     blob.attached = null;
   }
   blob.form = "fox";
-  blob.foxTimer = FOX_DURATION;
+  blob.foxTimer = foxTime;
   blob.dashTimer = 0;
   blob.squash = 0;
   burst(blob.x, blob.y, ["#ff9d3d", "#ffd9a8", "#ffffff"], 10, 220, 80);
@@ -719,15 +769,31 @@ function updateEnemies(dt) {
       e.t += dt * e.speed;
       e.fx = e.x + Math.sin(e.t) * e.ampX;
       e.fy = e.y + Math.sin(e.t) * e.ampY;
+    } else if (e.type === "shooter") {
+      // Hangs from the ceiling and snipes at the player below.
+      e.wob += dt * 3;
+      e.cooldown -= dt;
+      const dx = blob.x - e.x, dy = blob.y - e.y;
+      const inRange = blob.state === "alive" && Math.hypot(dx, dy) < 650 && dy > 40;
+      if (inRange && e.cooldown <= 0) {
+        e.cooldown = 2.8;
+        // Compensate for the arrow's gravity arc so a standing target
+        // actually gets hit — moving is how you dodge.
+        const d = Math.hypot(dx, dy) || 1;
+        const flightTime = d / 420;
+        const aimY = dy - 0.5 * 300 * flightTime * flightTime;
+        const ad = Math.hypot(dx, aimY) || 1;
+        projectiles.push({ x: e.x, y: e.y + 14, vx: (dx / ad) * 420, vy: (aimY / ad) * 420, age: 0 });
+      }
     } else {
       // Push-up rep: body rises and sinks; taller at the top of a rep.
       e.phase += dt * 2.4;
-      e.lift = (Math.sin(e.phase) * 0.5 + 0.5) * 34;
+      e.lift = (Math.sin(e.phase) * 0.5 + 0.5) * (e.liftAmp || 34);
       e.py = e.y - 26 - e.lift;
     }
     if (blob.state !== "alive") continue;
     const ex = e.type === "fly" ? e.fx : e.x;
-    const ey = e.type === "walk" ? e.y : e.type === "fly" ? e.fy : e.py;
+    const ey = e.type === "walk" ? e.y : e.type === "fly" ? e.fy : e.type === "shooter" ? e.y + 8 : e.py;
     if (Math.hypot(blob.x - ex, blob.y - ey) < blob.r + e.r - 6) {
       if (blob.form === "rock") {
         // Rocks squash critters.
@@ -736,6 +802,30 @@ function updateEnemies(dt) {
       } else {
         die("enemy");
       }
+    }
+  }
+}
+
+function updateProjectiles(dt) {
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const a = projectiles[i];
+    a.age += dt;
+    a.vy += 300 * dt; // arrows arc a little
+    a.x += a.vx * dt;
+    a.y += a.vy * dt;
+
+    let gone = a.age > 6 || a.y > WATER_Y + 20 || a.x < -50 || a.x > WORLD.w + 50;
+    if (!gone) {
+      for (const p of platforms) {
+        if (surfaceInfo(p, a.x, a.y).d < 4) { gone = true; break; }
+      }
+    }
+    if (gone) { projectiles.splice(i, 1); continue; }
+
+    if (blob.state === "alive" && Math.hypot(blob.x - a.x, blob.y - a.y) < blob.r) {
+      projectiles.splice(i, 1);
+      if (blob.form === "rock") continue; // arrows glance off stone
+      die("enemy");
     }
   }
 }
@@ -854,6 +944,7 @@ function update(dt) {
   if (blob.blink < -3) blob.blink = 0.13 + Math.random() * 0.1;
   star.spin += dt * 2;
   updateEnemies(dt); // moves critters; may kill or get squashed
+  updateProjectiles(dt);
 
   if (blob.state === "dead") {
     blob.stateTimer += dt;
@@ -1003,6 +1094,31 @@ function drawBackground(cm, time) {
     ctx.fill();
   }
 
+  if (LEVELS[levelIndex].theme === "city") {
+    // Skyline: two parallax layers of buildings with lit windows.
+    const layer = (par, color, spacing, baseH) => {
+      ctx.fillStyle = color;
+      const n = Math.ceil((WORLD.w * par + cw) / spacing) + 2;
+      for (let i = 0; i < n; i++) {
+        const bx = ((i * spacing - cm.cx * par) % (WORLD.w * par + cw + spacing * 2)) - spacing;
+        const bw = spacing * 0.72;
+        const bh = baseH + ((i * 137) % 3) * 60 + ((i * 61) % 2) * 35;
+        ctx.fillRect(bx, ch - bh, bw, bh);
+        // Windows.
+        ctx.fillStyle = "rgba(255,217,59,0.55)";
+        for (let wy = ch - bh + 18; wy < ch - 20; wy += 34) {
+          for (let wx = bx + 12; wx < bx + bw - 14; wx += 26) {
+            if ((((wx | 0) * 7 + (wy | 0) * 13) % 5) < 3) ctx.fillRect(wx, wy, 10, 13);
+          }
+        }
+        ctx.fillStyle = color;
+      }
+    };
+    layer(0.35, "#7fa8c9", 190, 160);
+    layer(0.6, "#5c85ad", 150, 90);
+    return;
+  }
+
   // Distant hills.
   ctx.fillStyle = "#7ee29a";
   const nHills = Math.max(5, Math.ceil(WORLD.w / 260));
@@ -1030,13 +1146,24 @@ function drawPlatform(p) {
   roundRect(x + 6, y + 5, p.w - 12, Math.min(14, p.h * 0.3), 8);
   ctx.fillStyle = "rgba(255,255,255,0.45)";
   ctx.fill();
-  // Cartoon dots.
-  ctx.fillStyle = "rgba(255,255,255,0.28)";
-  for (let dx = 22; dx < p.w - 12; dx += 44) {
-    for (let dy = 26; dy < p.h - 10; dy += 40) {
-      ctx.beginPath();
-      ctx.arc(x + dx, y + dy, 5, 0, Math.PI * 2);
-      ctx.fill();
+  if (LEVELS[levelIndex].theme === "city") {
+    // Windows instead of dots — these are buildings.
+    for (let dx = 20; dx < p.w - 26; dx += 40) {
+      for (let dy = 28; dy < p.h - 18; dy += 42) {
+        ctx.fillStyle = ((dx * 7 + dy * 13) % 5) < 3 ? "rgba(255,235,150,0.9)" : "rgba(0,40,80,0.25)";
+        roundRect(x + dx, y + dy, 16, 20, 3);
+        ctx.fill();
+      }
+    }
+  } else {
+    // Cartoon dots.
+    ctx.fillStyle = "rgba(255,255,255,0.28)";
+    for (let dx = 22; dx < p.w - 12; dx += 44) {
+      for (let dy = 26; dy < p.h - 10; dy += 40) {
+        ctx.beginPath();
+        ctx.arc(x + dx, y + dy, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   }
   ctx.restore();
@@ -1074,14 +1201,15 @@ function drawPoodle(e) {
 
   const fluff = "#fff4e3", fluffDark = "#e8d5bd", outline = "#c9a988";
 
-  // Legs: straighten as the body rises.
+  // Legs: straighten and strain as the body rises.
   ctx.strokeStyle = outline;
-  ctx.lineWidth = 6;
+  ctx.lineWidth = 6 + Math.min(4, lift * 0.045);
   ctx.lineCap = "round";
   for (const s of [-1, 1]) {
+    const top = -8 - lift * 0.8;
     ctx.beginPath();
     ctx.moveTo(s * 18, -2);
-    ctx.lineTo(s * 14, -8 - lift * 0.8);
+    ctx.quadraticCurveTo(s * (21 + lift * 0.05), top * 0.55, s * 14, top);
     ctx.stroke();
   }
   // Paws.
@@ -1165,10 +1293,110 @@ function drawPoodle(e) {
   ctx.restore();
 }
 
+// A red blob in a little hat, hanging from the ceiling underside,
+// glaring down and shooting arrows.
+function drawShooter(e) {
+  ctx.save();
+  ctx.translate(e.x, e.y);
+  const squish = 1 + Math.sin(e.wob) * 0.05;
+
+  // Body: squashed against the ceiling above.
+  ctx.beginPath();
+  ctx.ellipse(0, 8, 20 * squish, 18 / squish, 0, 0, Math.PI * 2);
+  const grad = ctx.createRadialGradient(-5, 2, 3, 0, 8, 26);
+  grad.addColorStop(0, "#ff8f80");
+  grad.addColorStop(0.55, "#f04438");
+  grad.addColorStop(1, "#c22418");
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.lineWidth = 3.5;
+  ctx.strokeStyle = "#8f1a10";
+  ctx.stroke();
+
+  // Little bowler hat, worn upside-down-proof (cartoon logic).
+  ctx.fillStyle = "#3a5068";
+  ctx.beginPath();
+  ctx.ellipse(0, 26, 15, 4.5, 0, 0, Math.PI * 2); // brim
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(0, 30, 9, 7, 0, 0, Math.PI); // crown (pointing down)
+  ctx.fill();
+  ctx.fillStyle = "#ffd93b";
+  ctx.fillRect(-9, 25, 18, 3); // hat band
+
+  // Eyes glaring down at you.
+  for (const s of [-1, 1]) {
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.ellipse(s * 8, 12, 5.5, 6.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#243040";
+    ctx.beginPath();
+    ctx.arc(s * 8, 15, 3, 0, Math.PI * 2);
+    ctx.fill();
+    // Cross brow.
+    ctx.strokeStyle = "#8f1a10";
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(s * 3, 5);
+    ctx.lineTo(s * 12, 8);
+    ctx.stroke();
+  }
+
+  // Tiny bow held at the side.
+  ctx.strokeStyle = "#7a4a1c";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(16, 18, 9, -0.5, Math.PI - 0.6);
+  ctx.stroke();
+  ctx.strokeStyle = "#ddd";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(16 + Math.cos(-0.5) * 9, 18 + Math.sin(-0.5) * 9);
+  ctx.lineTo(16 + Math.cos(Math.PI - 0.6) * 9, 18 + Math.sin(Math.PI - 0.6) * 9);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawProjectiles() {
+  for (const a of projectiles) {
+    ctx.save();
+    ctx.translate(a.x, a.y);
+    ctx.rotate(Math.atan2(a.vy, a.vx));
+    // Shaft.
+    ctx.strokeStyle = "#7a4a1c";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-14, 0);
+    ctx.lineTo(8, 0);
+    ctx.stroke();
+    // Head.
+    ctx.fillStyle = "#4d5a66";
+    ctx.beginPath();
+    ctx.moveTo(14, 0);
+    ctx.lineTo(6, -4);
+    ctx.lineTo(6, 4);
+    ctx.closePath();
+    ctx.fill();
+    // Fletching.
+    ctx.fillStyle = "#ff5d8f";
+    ctx.beginPath();
+    ctx.moveTo(-14, 0);
+    ctx.lineTo(-19, -5);
+    ctx.lineTo(-11, 0);
+    ctx.lineTo(-19, 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
 function drawEnemies(time) {
   for (const e of enemies) {
     if (!e.alive) continue;
     if (e.type === "poodle") { drawPoodle(e); continue; }
+    if (e.type === "shooter") { drawShooter(e); continue; }
     const ex = e.type === "walk" ? e.x : e.fx;
     const ey = e.type === "walk" ? e.y : e.fy;
     ctx.save();
@@ -1555,6 +1783,7 @@ function draw(time) {
   for (const p of platforms) drawPlatform(p);
   drawStar(time);
   drawEnemies(time);
+  drawProjectiles();
   drawBlob(time);
   drawWater(cm, time);
   drawParticles();
