@@ -271,6 +271,17 @@ html, body {
   animation: pop-in 0.45s cubic-bezier(0.2, 1.6, 0.4, 1) forwards;
 }
 
+/* Long warnings need to fit on a phone. */
+#banner.warn {
+  font-size: clamp(17px, 4.4vw, 34px);
+  text-shadow:
+    2px 2px 0 #e53170,
+    -2px 2px 0 #e53170,
+    2px -2px 0 #e53170,
+    -2px -2px 0 #e53170,
+    0 6px 14px rgba(0, 40, 80, 0.35);
+}
+
 @keyframes pop-in {
   from { transform: translate(-50%, -50%) scale(0) rotate(-8deg); }
   to   { transform: translate(-50%, -50%) scale(1) rotate(-3deg); }

@@ -26,6 +26,8 @@ const FOX_DURATION = 2.5;      // seconds of flight
 const FOX_SPEED = 480;         // full-stick flight speed
 const FOX_SAG = 260;           // gentle downward pull while gliding
 const FOX_FLAP = 340;          // upward kick from the jump button
+const SKY_GRACE = 3;           // seconds above the sky limit before the warning
+const SKY_FATAL = 5;           // ...and before it kills you
 
 const PALETTE = ["#ff8a3d", "#a86bff", "#ff5d8f", "#3ddc84", "#ffd93b", "#4ec9f5"];
 
@@ -180,41 +182,45 @@ const LEVELS = [
     // rooftop poodles do sky-high reps. No rock here — you can't
     // squash anything, only dodge. The fox lasts three times longer.
     name: "Fox City",
-    world: { w: 5400, h: 1080 },
-    waterY: 960,
-    spawn: { x: 170, y: 720 },
-    star: { x: 5010, y: 620 },
+    // Short world: the camera can't scroll vertically, so the top of
+    // the world really is the top of the screen and the overpasses
+    // seal off the sky. Fly above them and the altitude timer starts.
+    world: { w: 5400, h: 620 },
+    waterY: 575,
+    spawn: { x: 170, y: 430 },
+    star: { x: 5010, y: 400 },
+    skyLimit: 0,
     theme: "city",
     // Warm, saturated towers so they pop against the cool skyline.
     palette: ["#e0705a", "#f5c86e", "#7fd4c1", "#c9a0e8", "#ff9d6e"],
     foxTime: 7.5,
     noRock: true,
     platforms: [
-      // towers rising out of the canal (tops are the rooftops)
-      { x: 60,   y: 780, w: 240, h: 180 },
-      { x: 800,  y: 700, w: 220, h: 260 },
-      { x: 1600, y: 760, w: 280, h: 200 },
-      { x: 2500, y: 640, w: 300, h: 320 },
-      { x: 3400, y: 740, w: 300, h: 220 },
-      { x: 4100, y: 600, w: 280, h: 360 },
-      { x: 4900, y: 700, w: 240, h: 260 },
-      // overpasses the snipers hang from
-      { x: 600,  y: 220, w: 900,  h: 60 },
-      { x: 2400, y: 180, w: 1000, h: 60 },
-      { x: 4000, y: 200, w: 800,  h: 60 },
+      // towers rising out of the flooded streets (tops are rooftops)
+      { x: 60,   y: 470, w: 240, h: 150 },
+      { x: 800,  y: 490, w: 220, h: 130 },
+      { x: 1600, y: 465, w: 300, h: 155 },
+      { x: 2500, y: 455, w: 320, h: 165 },
+      { x: 3400, y: 490, w: 300, h: 130 },
+      { x: 4100, y: 470, w: 300, h: 150 },
+      { x: 4900, y: 480, w: 240, h: 140 },
+      // overpasses at the very top — the snipers hang under them
+      { x: 600,  y: 30, w: 900,  h: 50 },
+      { x: 2400, y: 30, w: 1000, h: 50 },
+      { x: 4000, y: 30, w: 800,  h: 50 },
     ],
     enemies: [
-      { type: "shooter", x: 1080, y: 280 },
-      { type: "shooter", x: 1380, y: 280 },
-      { type: "poodle",  x: 1820, y: 760, liftAmp: 110 },
-      { type: "shooter", x: 2550, y: 240 },
-      { type: "shooter", x: 2900, y: 240 },
-      { type: "shooter", x: 3250, y: 240 },
-      { type: "poodle",  x: 2740, y: 640, liftAmp: 110 },
-      { type: "poodle",  x: 3640, y: 740, liftAmp: 110 },
-      { type: "poodle",  x: 4320, y: 600, liftAmp: 110, phase: 2.5 },
-      { type: "shooter", x: 4150, y: 260 },
-      { type: "shooter", x: 4500, y: 260 },
+      { type: "shooter", x: 1080, y: 90 },
+      { type: "shooter", x: 1380, y: 90 },
+      { type: "poodle",  x: 1840, y: 465, liftAmp: 150, repSpeed: 3.8 },
+      { type: "shooter", x: 2550, y: 90 },
+      { type: "shooter", x: 2900, y: 90 },
+      { type: "shooter", x: 3250, y: 90 },
+      { type: "poodle",  x: 2760, y: 455, liftAmp: 150, repSpeed: 3.8 },
+      { type: "poodle",  x: 3640, y: 490, liftAmp: 150, repSpeed: 3.8 },
+      { type: "poodle",  x: 4340, y: 470, liftAmp: 150, repSpeed: 3.8, phase: 2.5 },
+      { type: "shooter", x: 4150, y: 90 },
+      { type: "shooter", x: 4500, y: 90 },
     ],
   },
 ];
@@ -252,6 +258,7 @@ const blob = {
   vtx: 0, vty: 0,    // current crawl velocity (for momentum when turning to rock)
   dashTimer: 0,      // seconds of dash left
   dashCooldown: 0,
+  skyTimer: 0,       // seconds spent above the level's sky limit
   faceX: 1, faceY: 0, // last stick direction, for dashing with a neutral stick
 };
 
@@ -601,10 +608,11 @@ function updateParticles(dt) {
 // ---------- game flow ----------
 
 let bannerTimeout = null;
-function showBanner(text, color, ttl) {
+function showBanner(text, color, ttl, small) {
   banner.textContent = text;
   banner.style.color = color || "#fff";
   banner.classList.remove("show");
+  banner.classList.toggle("warn", !!small);
   void banner.offsetWidth; // restart the pop animation
   banner.classList.add("show");
   clearTimeout(bannerTimeout);
@@ -631,13 +639,14 @@ function resetLevel() {
   blob.dashCooldown = 0;
   blob.faceX = 1; blob.faceY = 0;
   blob.foxTimer = 0;
+  blob.skyTimer = 0;
   star.taken = false;
   cam.x = SPAWN.x; cam.y = SPAWN.y;
   // Respawn this level's enemies.
   enemies = (LEVELS[levelIndex].enemies || []).map((d) => {
     if (d.type === "walk") return { ...d, r: 20, speed: d.speed || 90, alive: true, x: d.x0, dir: 1, anim: Math.random() * 7 };
     if (d.type === "fly") return { ...d, r: 20, alive: true, t: Math.random() * 7, fx: d.x, fy: d.y };
-    if (d.type === "shooter") return { ...d, r: 20, alive: true, cooldown: 0.6 + Math.random() * 2.2, wob: Math.random() * 7 };
+    if (d.type === "shooter") return { ...d, r: 20, alive: true, cooldown: 0.3 + Math.random() * 1.1, wob: Math.random() * 7 };
     // poodle: stationary push-upper; py is the bobbing body center
     return { ...d, r: 24, alive: true, phase: d.phase ?? Math.random() * 6, py: d.y - 26, dir: Math.random() < 0.5 ? -1 : 1 };
   });
@@ -748,7 +757,10 @@ function die(cause) {
   blob.state = "dead";
   blob.stateTimer = 0;
   blob.attached = null;
-  if (cause === "enemy") {
+  if (cause === "sky") {
+    burst(blob.x, blob.y, ["#ffffff", "#8fdcff", "#ffd93b"], 24, 400, 150);
+    showBanner("TOO HIGH!", "#ffffff");
+  } else if (cause === "enemy") {
     burst(blob.x, blob.y, ["#ff5d8f", "#ffd93b", "#ffffff"], 24, 400, 150);
     showBanner("OUCH!", "#ff9db8");
   } else {
@@ -776,7 +788,7 @@ function updateEnemies(dt) {
       const dx = blob.x - e.x, dy = blob.y - e.y;
       const inRange = blob.state === "alive" && Math.hypot(dx, dy) < 650 && dy > 40;
       if (inRange && e.cooldown <= 0) {
-        e.cooldown = 2.8;
+        e.cooldown = 1.4;
         // Compensate for the arrow's gravity arc so a standing target
         // actually gets hit — moving is how you dodge.
         const d = Math.hypot(dx, dy) || 1;
@@ -787,7 +799,7 @@ function updateEnemies(dt) {
       }
     } else {
       // Push-up rep: body rises and sinks; taller at the top of a rep.
-      e.phase += dt * 2.4;
+      e.phase += dt * (e.repSpeed || 2.4);
       e.lift = (Math.sin(e.phase) * 0.5 + 0.5) * (e.liftAmp || 34);
       e.py = e.y - 26 - e.lift;
     }
@@ -1010,6 +1022,23 @@ function update(dt) {
     win();
   }
 
+  // Some levels are sealed by a ceiling: flying above the top of the
+  // screen is allowed briefly, then warned about, then fatal.
+  const skyLimit = LEVELS[levelIndex].skyLimit;
+  if (skyLimit !== undefined && blob.y < skyLimit) {
+    blob.skyTimer += dt;
+    if (blob.skyTimer > SKY_GRACE) {
+      // Flash the warning repeatedly while you're still up there.
+      if (Math.floor(blob.skyTimer * 2) !== Math.floor((blob.skyTimer - dt) * 2)) {
+        showBanner("Too high, go down or die!", "#ffffff", 0, true);
+      }
+      if (blob.skyTimer > SKY_FATAL) die("sky");
+    }
+  } else if (blob.skyTimer > 0) {
+    blob.skyTimer = 0;
+    if (banner.textContent === "Too high, go down or die!") hideBanner();
+  }
+
   // Water is deadly.
   if (blob.y + blob.r * 0.4 > WATER_Y) die();
   // Safety net: out of world sideways.
@@ -1027,7 +1056,9 @@ function cameraTransform() {
   const ch = canvas.height / devicePixelRatio;
   // Landscape screens are short: show fewer world units vertically so
   // the game doesn't shrink to a miniature.
-  const viewH = ch >= cw ? VIEW_H : VIEW_H_LANDSCAPE;
+  // Never show more height than the level actually has, or short
+  // levels get framed with a band of empty water.
+  const viewH = Math.min(ch >= cw ? VIEW_H : VIEW_H_LANDSCAPE, WORLD.h);
   const zoom = Math.max(ch / viewH, cw / WORLD.w);
   const vw = cw / zoom, vh = ch / zoom;
 
