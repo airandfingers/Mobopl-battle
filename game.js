@@ -336,33 +336,290 @@ document.getElementById("btn-left").addEventListener("pointerdown", (e) => {
   becomeFox();
 });
 
-// ---------- chimes ----------
+// ---------- audio ----------
+// Everything is synthesized with Web Audio — no asset files.
 
 let audioCtx = null;
+let masterGain, musicGain, sfxGain;
+let noiseBuffer = null;
+let muted = false;
+
+function initAudio() {
+  if (audioCtx) return true;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  } catch (_) {
+    return false; // no audio available — play on silently
+  }
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = muted ? 0 : 1;
+  masterGain.connect(audioCtx.destination);
+  musicGain = audioCtx.createGain();
+  musicGain.gain.value = 0.16;
+  musicGain.connect(masterGain);
+  sfxGain = audioCtx.createGain();
+  sfxGain.gain.value = 0.5;
+  sfxGain.connect(masterGain);
+  return true;
+}
+
+function noise() {
+  if (!noiseBuffer) {
+    const len = Math.floor(audioCtx.sampleRate * 0.6);
+    noiseBuffer = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+    const d = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  const src = audioCtx.createBufferSource();
+  src.buffer = noiseBuffer;
+  return src;
+}
 
 // A quick ascending arpeggio of soft triangle-wave notes.
 function playChime(notes) {
-  try {
-    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === "suspended") audioCtx.resume();
-    notes.forEach((freq, i) => {
-      const t = audioCtx.currentTime + i * 0.07;
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = "triangle";
-      osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(0.2, t + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
-      osc.connect(gain).connect(audioCtx.destination);
-      osc.start(t);
-      osc.stop(t + 0.4);
-    });
-  } catch (_) { /* no audio available — play on silently */ }
+  if (!initAudio()) return;
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  notes.forEach((freq, i) => {
+    const t = audioCtx.currentTime + i * 0.07;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "triangle";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.2, t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+    osc.connect(gain).connect(sfxGain);
+    osc.start(t);
+    osc.stop(t + 0.4);
+  });
 }
 
 const CHIME_OPEN = [523.25, 659.25, 783.99];            // C5 E5 G5
 const CHIME_SELECT = [523.25, 659.25, 783.99, 1046.5];  // C5 E5 G5 C6
+const CHIME_FOX = [659.25, 880, 1174.66];               // E5 A5 D6 — takeoff
+
+// Dash: a filtered noise sweep that whooshes past.
+function sfxSwoosh() {
+  if (!initAudio()) return;
+  const t = audioCtx.currentTime;
+  const src = noise();
+  const bp = audioCtx.createBiquadFilter();
+  bp.type = "bandpass";
+  bp.Q.value = 1.1;
+  bp.frequency.setValueAtTime(500, t);
+  bp.frequency.exponentialRampToValueAtTime(3600, t + 0.11);
+  bp.frequency.exponentialRampToValueAtTime(700, t + 0.3);
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.5, t + 0.03);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+  src.connect(bp).connect(g).connect(sfxGain);
+  src.start(t);
+  src.stop(t + 0.34);
+}
+
+// Jump: springy pitch leap with a wobble on the way down.
+function sfxBoing(vol = 0.45) {
+  if (!initAudio()) return;
+  const t = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  osc.type = "triangle";
+  osc.frequency.setValueAtTime(170, t);
+  osc.frequency.exponentialRampToValueAtTime(540, t + 0.05);
+  osc.frequency.exponentialRampToValueAtTime(130, t + 0.3);
+  const lfo = audioCtx.createOscillator();
+  lfo.type = "sine";
+  lfo.frequency.value = 17;
+  const lfoAmt = audioCtx.createGain();
+  lfoAmt.gain.value = 45;
+  lfo.connect(lfoAmt).connect(osc.frequency);
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.33);
+  osc.connect(g).connect(sfxGain);
+  osc.start(t); osc.stop(t + 0.35);
+  lfo.start(t); lfo.stop(t + 0.35);
+}
+
+// Rock: a low, heavy hwump.
+function sfxHwump() {
+  if (!initAudio()) return;
+  const t = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(190, t);
+  osc.frequency.exponentialRampToValueAtTime(42, t + 0.19);
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.75, t + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+  osc.connect(g).connect(sfxGain);
+  osc.start(t); osc.stop(t + 0.32);
+
+  const src = noise();
+  const lp = audioCtx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.setValueAtTime(1000, t);
+  lp.frequency.exponentialRampToValueAtTime(130, t + 0.16);
+  const ng = audioCtx.createGain();
+  ng.gain.setValueAtTime(0.4, t);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.19);
+  src.connect(lp).connect(ng).connect(sfxGain);
+  src.start(t); src.stop(t + 0.2);
+}
+
+// Arrow release: a bowstring twang.
+function sfxTwang() {
+  if (!initAudio()) return;
+  const t = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  osc.type = "sawtooth";
+  osc.frequency.setValueAtTime(540, t);
+  osc.frequency.exponentialRampToValueAtTime(170, t + 0.17);
+  const bp = audioCtx.createBiquadFilter();
+  bp.type = "bandpass";
+  bp.Q.value = 3;
+  bp.frequency.value = 950;
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.3, t + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+  osc.connect(bp).connect(g).connect(sfxGain);
+  osc.start(t); osc.stop(t + 0.24);
+}
+
+// Poodle: two little yips.
+function sfxBark() {
+  if (!initAudio()) return;
+  const t = audioCtx.currentTime;
+  for (let i = 0; i < 2; i++) {
+    const s = t + i * 0.14;
+    const osc = audioCtx.createOscillator();
+    osc.type = "square";
+    osc.frequency.setValueAtTime(430 + i * 70, s);
+    osc.frequency.exponentialRampToValueAtTime(230, s + 0.09);
+    const bp = audioCtx.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.Q.value = 2.2;
+    bp.frequency.value = 1250;
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.0001, s);
+    g.gain.exponentialRampToValueAtTime(0.3, s + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, s + 0.12);
+    osc.connect(bp).connect(g).connect(sfxGain);
+    osc.start(s); osc.stop(s + 0.13);
+  }
+}
+
+// ---------- background music ----------
+// Two looping songs: a bouncy one for normal play and a faster,
+// brighter one while you're flying as the fox.
+
+const SONGS = {
+  cheerful: {
+    bpm: 128,
+    wave: "triangle",
+    lead: [
+      72, 76, 79, 76, 77, 76, 74, 72,
+      74, 77, 81, 77, 79, 77, 76, 74,
+      72, 76, 79, 84, 83, 79, 76, 72,
+      74, 71, 74, 79, 77, 76, 72, 0,
+    ],
+    bass: [
+      48, 0, 55, 0, 48, 0, 52, 0,
+      53, 0, 60, 0, 53, 0, 57, 0,
+      48, 0, 55, 0, 48, 0, 52, 0,
+      43, 0, 50, 0, 43, 0, 47, 0,
+    ],
+  },
+  fox: {
+    bpm: 168,
+    wave: "square",
+    lead: [
+      81, 84, 88, 84, 81, 84, 88, 91,
+      88, 84, 81, 84, 88, 91, 93, 88,
+      79, 83, 86, 83, 79, 83, 86, 90,
+      88, 86, 83, 79, 81, 84, 88, 93,
+    ],
+    bass: [
+      45, 0, 52, 0, 45, 0, 49, 0,
+      41, 0, 48, 0, 41, 0, 45, 0,
+      43, 0, 50, 0, 43, 0, 47, 0,
+      40, 0, 47, 0, 40, 0, 44, 0,
+    ],
+  },
+};
+
+let currentSong = "cheerful";
+let musicStep = 0;
+let nextStepTime = 0;
+let musicTimer = null;
+
+const midiFreq = (m) => 440 * Math.pow(2, (m - 69) / 12);
+
+function playTone(midi, t, dur, type, vol) {
+  const osc = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.value = midiFreq(midi);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  osc.connect(g).connect(musicGain);
+  osc.start(t);
+  osc.stop(t + dur + 0.02);
+}
+
+function scheduleMusic() {
+  if (!audioCtx || muted) return;
+  const song = SONGS[currentSong];
+  const stepDur = 60 / song.bpm / 2; // eighth notes
+  while (nextStepTime < audioCtx.currentTime + 0.2) {
+    if (nextStepTime > audioCtx.currentTime) {
+      const lead = song.lead[musicStep];
+      const bass = song.bass[musicStep];
+      if (lead) playTone(lead, nextStepTime, stepDur * 0.9, song.wave, 0.28);
+      if (bass) playTone(bass, nextStepTime, stepDur * 1.7, "triangle", 0.4);
+    }
+    musicStep = (musicStep + 1) % song.lead.length;
+    nextStepTime += stepDur;
+  }
+}
+
+function setSong(name) {
+  if (name === currentSong) return;
+  currentSong = name;
+  musicStep = 0;
+  if (audioCtx) nextStepTime = audioCtx.currentTime + 0.05;
+}
+
+// Browsers need a gesture before audio starts.
+function startAudio() {
+  if (!initAudio()) return;
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  if (!musicTimer) {
+    nextStepTime = audioCtx.currentTime + 0.1;
+    musicTimer = setInterval(scheduleMusic, 40);
+  }
+}
+addEventListener("pointerdown", startAudio);
+addEventListener("keydown", startAudio);
+
+// Don't keep playing once the game is in the background.
+addEventListener("visibilitychange", () => {
+  if (!audioCtx) return;
+  if (document.hidden) audioCtx.suspend();
+  else if (!muted) audioCtx.resume();
+});
+
+const muteBtn = document.getElementById("btn-mute");
+muteBtn.addEventListener("click", () => {
+  muted = !muted;
+  muteBtn.textContent = muted ? "🔇" : "🔊";
+  if (masterGain) masterGain.gain.value = muted ? 0 : 1;
+  if (!muted) startAudio();
+});
 
 // ---------- level selector ----------
 
@@ -681,6 +938,7 @@ function startDash() {
   blob.dashTimer = DASH_TIME;
   blob.dashCooldown = 0.4;
   blob.squash = 0;
+  sfxSwoosh();
   burst(blob.x, blob.y, ["#ffffff", "#b8ff66", "#8fdcff"], 8, 180, 40);
 }
 
@@ -698,6 +956,7 @@ function becomeRock() {
   blob.form = "rock";
   blob.rockTimer = ROCK_DURATION;
   blob.squash = 0;
+  sfxHwump();
   burst(blob.x, blob.y, ["#b8a58c", "#8d7a60", "#ffffff"], 10, 220, 80);
 }
 
@@ -724,6 +983,7 @@ function becomeFox() {
   blob.foxTimer = foxTime;
   blob.dashTimer = 0;
   blob.squash = 0;
+  playChime(CHIME_FOX);
   burst(blob.x, blob.y, ["#ff9d3d", "#ffd9a8", "#ffffff"], 10, 220, 80);
 }
 
@@ -736,6 +996,7 @@ function updateFox(dt) {
   if (input.jumpBuffer > 0) {
     input.jumpBuffer = 0;
     blob.vy = Math.max(blob.vy - FOX_FLAP, -FOX_SPEED);
+    sfxBoing(0.22); // lighter flap version of the jump boing
   }
   blob.x += blob.vx * dt;
   blob.y += blob.vy * dt;
@@ -796,12 +1057,20 @@ function updateEnemies(dt) {
         const aimY = dy - 0.5 * 300 * flightTime * flightTime;
         const ad = Math.hypot(dx, aimY) || 1;
         projectiles.push({ x: e.x, y: e.y + 14, vx: (dx / ad) * 420, vy: (aimY / ad) * 420, age: 0 });
+        if (d < 700) sfxTwang(); // only the ones near enough to hear
       }
     } else {
       // Push-up rep: body rises and sinks; taller at the top of a rep.
       e.phase += dt * (e.repSpeed || 2.4);
       e.lift = (Math.sin(e.phase) * 0.5 + 0.5) * (e.liftAmp || 34);
       e.py = e.y - 26 - e.lift;
+      // Yap at the blob when it gets close.
+      e.barkCooldown = (e.barkCooldown || 0) - dt;
+      if (blob.state === "alive" && e.barkCooldown <= 0 &&
+          Math.hypot(blob.x - e.x, blob.y - e.py) < 150) {
+        e.barkCooldown = 1.3;
+        sfxBark();
+      }
     }
     if (blob.state !== "alive") continue;
     const ex = e.type === "fly" ? e.fx : e.x;
@@ -955,6 +1224,8 @@ function update(dt) {
   blob.blink -= dt;
   if (blob.blink < -3) blob.blink = 0.13 + Math.random() * 0.1;
   star.spin += dt * 2;
+  // Flying swaps the soundtrack to the faster tune.
+  setSong(blob.form === "fox" && blob.state === "alive" ? "fox" : "cheerful");
   updateEnemies(dt); // moves critters; may kill or get squashed
   updateProjectiles(dt);
 
@@ -1005,6 +1276,7 @@ function update(dt) {
       blob.attached = null;
       blob.noStickTimer = 0.12;
       blob.squash = -0.35; // stretch on launch
+      sfxBoing();
     }
   } else {
     // Airborne: velocity follows the stick directly, so releasing it
