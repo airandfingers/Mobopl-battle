@@ -250,6 +250,38 @@ html, body {
   color: #7a4a00;
 }
 
+/* ---------- altitude countdown ---------- */
+
+#sky-countdown {
+  position: fixed;
+  left: 50%;
+  top: 34%;
+  transform: translate(-50%, -50%);
+  font-size: clamp(40px, 11vw, 84px);
+  font-weight: bold;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  text-shadow:
+    3px 3px 0 #e53170,
+    -3px 3px 0 #e53170,
+    3px -3px 0 #e53170,
+    -3px -3px 0 #e53170,
+    0 8px 18px rgba(0, 40, 80, 0.4);
+  letter-spacing: 2px;
+  pointer-events: none;
+  z-index: 20;
+  animation: countdown-pulse 0.5s ease-in-out infinite;
+}
+
+#sky-countdown.hidden {
+  display: none;
+}
+
+@keyframes countdown-pulse {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50%      { transform: translate(-50%, -50%) scale(1.09); }
+}
+
 /* ---------- banner messages ---------- */
 
 #banner {
