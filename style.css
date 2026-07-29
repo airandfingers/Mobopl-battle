@@ -137,7 +137,7 @@ html, body {
 
 /* ---------- fullscreen button ---------- */
 
-#btn-fs {
+#btn-fs, #btn-mute {
   position: fixed;
   top: calc(12px + env(safe-area-inset-top));
   right: calc(12px + env(safe-area-inset-right));
@@ -154,7 +154,12 @@ html, body {
   z-index: 15;
 }
 
-#btn-fs:active {
+#btn-mute {
+  right: calc(64px + env(safe-area-inset-right));
+  font-size: 20px;
+}
+
+#btn-fs:active, #btn-mute:active {
   transform: scale(0.9);
 }
 
