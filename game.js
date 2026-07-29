@@ -10,6 +10,7 @@
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 const banner = document.getElementById("banner");
+const skyCountdown = document.getElementById("sky-countdown");
 
 // ---------- world ----------
 
@@ -26,8 +27,7 @@ const FOX_DURATION = 2.5;      // seconds of flight
 const FOX_SPEED = 480;         // full-stick flight speed
 const FOX_SAG = 260;           // gentle downward pull while gliding
 const FOX_FLAP = 340;          // upward kick from the jump button
-const SKY_GRACE = 3;           // seconds above the sky limit before the warning
-const SKY_FATAL = 5;           // ...and before it kills you
+const SKY_GRACE = 3;           // seconds you get above the sky limit
 
 const PALETTE = ["#ff8a3d", "#a86bff", "#ff5d8f", "#3ddc84", "#ffd93b", "#4ec9f5"];
 
@@ -189,7 +189,7 @@ const LEVELS = [
     waterY: 575,
     spawn: { x: 170, y: 430 },
     star: { x: 5010, y: 400 },
-    skyLimit: 0,
+    skyLimit: "ceiling", // resolved to the top edge of the highest platform
     theme: "city",
     // Warm, saturated towers so they pop against the cool skyline.
     palette: ["#e0705a", "#f5c86e", "#7fd4c1", "#c9a0e8", "#ff9d6e"],
@@ -229,6 +229,9 @@ for (const L of LEVELS) {
   const pal = L.palette || PALETTE;
   L.platforms.forEach((p, i) => { p.angle = p.angle || 0; p.color = pal[i % pal.length]; });
   L.star = { ...L.star, r: 26, taken: false, spin: 0 };
+  // Rising above the highest platform's top edge is what starts the
+  // countdown, so keep the two locked together.
+  if (L.skyLimit === "ceiling") L.skyLimit = Math.min(...L.platforms.map((p) => p.y));
 }
 
 // Current-level state, populated by loadLevel().
@@ -487,6 +490,69 @@ function sfxTwang() {
   g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
   osc.connect(bp).connect(g).connect(sfxGain);
   osc.start(t); osc.stop(t + 0.24);
+}
+
+// Level clear: a bright little fanfare.
+function sfxVictory() {
+  if (!initAudio()) return;
+  const t0 = audioCtx.currentTime;
+  const notes = [72, 76, 79, 84]; // C E G C — climbing
+  notes.forEach((m, i) => {
+    const t = t0 + i * 0.11;
+    const osc = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    osc.type = "triangle";
+    osc.frequency.value = midiFreq(m);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.34, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+    osc.connect(g).connect(sfxGain);
+    osc.start(t); osc.stop(t + 0.42);
+  });
+  // Ringing chord to finish on.
+  [76, 79, 84, 88].forEach((m) => {
+    const t = t0 + 0.46;
+    const osc = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    osc.type = "triangle";
+    osc.frequency.value = midiFreq(m);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.2, t + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.1);
+    osc.connect(g).connect(sfxGain);
+    osc.start(t); osc.stop(t + 1.15);
+  });
+}
+
+// Death: a deflating little tumble downward.
+function sfxGameOver() {
+  if (!initAudio()) return;
+  const t0 = audioCtx.currentTime;
+  const notes = [67, 65, 63, 60]; // G F Eb C — sagging
+  notes.forEach((m, i) => {
+    const t = t0 + i * 0.13;
+    const osc = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    osc.type = "triangle";
+    osc.frequency.value = midiFreq(m);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.3, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
+    osc.connect(g).connect(sfxGain);
+    osc.start(t); osc.stop(t + 0.44);
+  });
+  // Final low slide.
+  const t = t0 + 0.52;
+  const osc = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(midiFreq(55), t);
+  osc.frequency.exponentialRampToValueAtTime(midiFreq(41), t + 0.55);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.34, t + 0.03);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+  osc.connect(g).connect(sfxGain);
+  osc.start(t); osc.stop(t + 0.62);
 }
 
 // Poodle: two little yips.
@@ -897,6 +963,7 @@ function resetLevel() {
   blob.faceX = 1; blob.faceY = 0;
   blob.foxTimer = 0;
   blob.skyTimer = 0;
+  skyCountdown.classList.add("hidden");
   star.taken = false;
   cam.x = SPAWN.x; cam.y = SPAWN.y;
   // Respawn this level's enemies.
@@ -1018,6 +1085,9 @@ function die(cause) {
   blob.state = "dead";
   blob.stateTimer = 0;
   blob.attached = null;
+  blob.skyTimer = 0;
+  skyCountdown.classList.add("hidden");
+  sfxGameOver();
   if (cause === "sky") {
     burst(blob.x, blob.y, ["#ffffff", "#8fdcff", "#ffd93b"], 24, 400, 150);
     showBanner("TOO HIGH!", "#ffffff");
@@ -1115,6 +1185,7 @@ function win() {
   blob.state = "won";
   blob.stateTimer = 0;
   star.taken = true;
+  sfxVictory();
   burst(star.x, star.y, PALETTE, 40, 500, 250);
   showBanner(levelIndex === LEVELS.length - 1 ? "ALL CLEAR!" : "LEVEL CLEAR!", "#ffd93b");
 }
@@ -1294,20 +1365,23 @@ function update(dt) {
     win();
   }
 
-  // Some levels are sealed by a ceiling: flying above the top of the
-  // screen is allowed briefly, then warned about, then fatal.
+  // Some levels are sealed by a ceiling: rise above the top of the
+  // highest platform and a three-second countdown starts.
   const skyLimit = LEVELS[levelIndex].skyLimit;
   if (skyLimit !== undefined && blob.y < skyLimit) {
+    const wasBelow = blob.skyTimer === 0;
     blob.skyTimer += dt;
-    if (blob.skyTimer > SKY_GRACE) {
-      // Flash the warning repeatedly while you're still up there.
-      if (Math.floor(blob.skyTimer * 2) !== Math.floor((blob.skyTimer - dt) * 2)) {
-        showBanner("Too high, go down or die!", "#ffffff", 0, true);
-      }
-      if (blob.skyTimer > SKY_FATAL) die("sky");
+    const left = Math.max(0, SKY_GRACE - blob.skyTimer);
+    skyCountdown.textContent = left.toFixed(1);
+    skyCountdown.classList.remove("hidden");
+    // Flash the warning on arrival, then twice a second.
+    if (wasBelow || Math.floor(blob.skyTimer * 2) !== Math.floor((blob.skyTimer - dt) * 2)) {
+      showBanner("Too high, go down or die!", "#ffffff", 0, true);
     }
+    if (left <= 0) die("sky");
   } else if (blob.skyTimer > 0) {
     blob.skyTimer = 0;
+    skyCountdown.classList.add("hidden");
     if (banner.textContent === "Too high, go down or die!") hideBanner();
   }
 
@@ -1504,15 +1578,18 @@ function drawPoodle(e) {
 
   const fluff = "#fff4e3", fluffDark = "#e8d5bd", outline = "#c9a988";
 
-  // Legs: straighten and strain as the body rises.
+  const by = -26 - lift; // body centre, so the legs can reach it
+
+  // Legs: straighten and strain as the body rises, staying joined to
+  // the body no matter how high the rep goes.
   ctx.strokeStyle = outline;
   ctx.lineWidth = 6 + Math.min(4, lift * 0.045);
   ctx.lineCap = "round";
   for (const s of [-1, 1]) {
-    const top = -8 - lift * 0.8;
+    const top = by + 12; // tucked inside the fluff
     ctx.beginPath();
     ctx.moveTo(s * 18, -2);
-    ctx.quadraticCurveTo(s * (21 + lift * 0.05), top * 0.55, s * 14, top);
+    ctx.quadraticCurveTo(s * (21 + lift * 0.05), (top - 2) * 0.55, s * 13, top);
     ctx.stroke();
   }
   // Paws.
@@ -1524,7 +1601,6 @@ function drawPoodle(e) {
   }
 
   // Body: horizontal cluster of fluff puffs.
-  const by = -26 - lift;
   ctx.fillStyle = fluff;
   ctx.strokeStyle = outline;
   ctx.lineWidth = 3;
